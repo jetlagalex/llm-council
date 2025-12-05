@@ -2,7 +2,22 @@
  * API client for the LLM Council backend.
  */
 
-const API_BASE = 'http://localhost:8001';
+// Allow overriding the backend URL with VITE_API_BASE, otherwise:
+// - Default to the same host on port 8001 so IPv4/IPv6 access in an LXC works
+//   without having to edit the frontend bundle.
+// - Keep localhost as a special case for dev.
+const envBase = (import.meta.env.VITE_API_BASE || '').trim().replace(/\/+$/, '');
+
+const computeHostPortBase = () => {
+  if (typeof window === 'undefined') return 'http://localhost:8001';
+  const { protocol, hostname } = window.location;
+  const host = hostname.includes(':') ? `[${hostname}]` : hostname; // IPv6 safe
+  return `${protocol}//${host}:8001`;
+};
+
+const API_BASE =
+  envBase ||
+  computeHostPortBase();
 
 export const api = {
   /**

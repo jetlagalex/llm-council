@@ -18,6 +18,9 @@
   gap: 8px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
 }
 
 .tab {
@@ -62,4 +65,19 @@
 .response-text {
   color: #333;
   line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .stage {
+    padding: 16px;
+  }
+
+  .tab {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  .tab-content {
+    padding: 12px;
+  }
 }

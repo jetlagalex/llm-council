@@ -8,17 +8,26 @@ from typing import List, Dict, Any
 import uuid
 import json
 import asyncio
+import os
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
 
-# Enable CORS for local development
+# Enable CORS. Default to permissive so mobile devices or other hosts (e.g. in
+# a proxmox container) can reach the API, but allow tightening via CORS_ORIGINS.
+raw_origins = os.environ.get("CORS_ORIGINS")
+allow_origins = (
+    [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    if raw_origins
+    else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=allow_origins,
+    allow_credentials="*" not in allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

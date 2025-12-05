@@ -9,10 +9,30 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= 900 : false
+  );
+  const [isSidebarOpen, setIsSidebarOpen] = useState(
+    typeof window !== 'undefined' ? window.innerWidth > 900 : true
+  );
 
   // Load conversations on mount
   useEffect(() => {
     loadConversations();
+  }, []);
+
+  // Track viewport size for mobile layout
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth <= 900;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setIsSidebarOpen(true);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   // Load conversation details when selected
@@ -26,6 +46,9 @@ function App() {
     try {
       const convs = await api.listConversations();
       setConversations(convs);
+      if (!currentConversationId && convs.length > 0) {
+        setCurrentConversationId(convs[0].id);
+      }
     } catch (error) {
       console.error('Failed to load conversations:', error);
     }
@@ -44,10 +67,18 @@ function App() {
     try {
       const newConv = await api.createConversation();
       setConversations([
-        { id: newConv.id, created_at: newConv.created_at, message_count: 0 },
+        {
+          id: newConv.id,
+          created_at: newConv.created_at,
+          message_count: 0,
+          title: newConv.title,
+        },
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
+      if (isMobile) {
+        setIsSidebarOpen(false);
+      }
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
@@ -55,6 +86,9 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+    if (isMobile) {
+      setIsSidebarOpen(false);
+    }
   };
 
   const handleSendMessage = async (content) => {
@@ -182,17 +216,26 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${isMobile ? 'is-mobile' : ''}`}>
+      {isMobile && isSidebarOpen && (
+        <div className="sidebar-backdrop" onClick={() => setIsSidebarOpen(false)} />
+      )}
+
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        isOpen={isSidebarOpen}
+        isMobile={isMobile}
+        onClose={() => setIsSidebarOpen(false)}
       />
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        onOpenSidebar={() => setIsSidebarOpen(true)}
+        isMobile={isMobile}
       />
     </div>
   );
