@@ -55,8 +55,12 @@ export default function ChatInterface({
     <div className="chat-interface">
       <div className="chat-header">
         {isMobile && (
-          <button className="sidebar-toggle" onClick={onOpenSidebar}>
-            Conversations
+          <button className="sidebar-toggle" onClick={onOpenSidebar} aria-label="Open conversations">
+            <span className="burger-lines" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
           </button>
         )}
         <div className="chat-title">
