@@ -1,6 +1,7 @@
 """Configuration for the LLM Council."""
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,5 +23,6 @@ CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
 # OpenRouter API endpoint
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Data directory for conversation storage
-DATA_DIR = "data/conversations"
+# SQLite database for conversation storage
+DATA_DIR = Path("data")
+DB_PATH = DATA_DIR / "council.sqlite"
