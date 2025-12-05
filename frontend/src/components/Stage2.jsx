@@ -2,6 +2,7 @@ import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './Stage2.css';
 
+// Displays each model's ranking narrative and a combined leaderboard.
 function deAnonymizeText(text, labelToModel) {
   if (!labelToModel) return text;
 

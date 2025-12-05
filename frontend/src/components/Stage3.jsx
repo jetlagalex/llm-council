@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import './Stage3.css';
 
+// Final chairman synthesis after peer review.
 export default function Stage3({ finalResponse }) {
   if (!finalResponse) {
     return null;

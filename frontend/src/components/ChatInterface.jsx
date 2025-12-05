@@ -5,6 +5,7 @@ import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import './ChatInterface.css';
 
+// Shows the conversation thread and wiring for the compose box.
 export default function ChatInterface({
   conversation,
   onSendMessage,

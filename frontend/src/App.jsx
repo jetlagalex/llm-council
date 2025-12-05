@@ -4,6 +4,7 @@ import ChatInterface from './components/ChatInterface';
 import { api } from './api';
 import './App.css';
 
+// Root layout: manages conversation list, selection, and streamed message flow.
 function App() {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
@@ -91,6 +92,7 @@ function App() {
     }
   };
 
+  // Kick off a council run and mirror the streaming SSE events into UI state.
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
 

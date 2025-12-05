@@ -1,5 +1,6 @@
 import './Sidebar.css';
 
+// Lists available conversations and basic actions.
 export default function Sidebar({
   conversations,
   currentConversationId,

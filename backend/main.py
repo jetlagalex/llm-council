@@ -23,11 +23,13 @@ allow_origins = (
     if raw_origins
     else ["*"]
 )
+# When allowing all origins, credentials must be disabled per the CORS spec.
+allow_credentials = False if "*" in allow_origins else True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials="*" not in allow_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -146,6 +148,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Stream stage milestones as SSE events so the UI can update incrementally.
     async def event_generator():
         try:
             # Add user message

@@ -69,7 +69,7 @@ async def query_models_parallel(
     """
     import asyncio
 
-    # Create tasks for all models
+    # Fire all requests concurrently so slow models do not block faster ones.
     tasks = [query_model(model, messages) for model in models]
 
     # Wait for all to complete
