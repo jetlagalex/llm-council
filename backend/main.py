@@ -2,7 +2,6 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import uuid
@@ -67,54 +66,63 @@ class Conversation(BaseModel):
     messages: List[Dict[str, Any]]
 
 
+class UpdateStartResponse(BaseModel):
+    """Response returned when the updater is successfully launched."""
+    status: str
+    unit: str
+    log_path: str
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
 
 
-@app.post("/api/update")
+@app.post("/api/update", response_model=UpdateStartResponse)
 async def run_update_script():
     """
-    Kick off the update script and stream its stdout/stderr as SSE events so the
-    frontend can show live progress (instead of looking frozen).
+    Kick off the update script via systemd-run so it continues after this API
+    process stops (the script intentionally restarts services). We return
+    immediately with the transient unit name and log path.
     """
     script_path = "/opt/llm-council/update.sh"
+    log_path = "/opt/llm-council/update.log"
     if not os.path.exists(script_path):
         raise HTTPException(status_code=404, detail="Update script not found")
 
-    async def event_generator():
-        try:
-            # Stream stdout/stderr so the client can surface progress lines.
-            process = await asyncio.create_subprocess_exec(
-                script_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-        except PermissionError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Update script is not executable'})}\n\n"
-            return
-        except Exception as exc:  # pragma: no cover - defensive
-            yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to start update: {exc}'})}\n\n"
-            return
+    # Launch a transient unit so the script runs outside this service's cgroup.
+    unit_name = f"llm-council-update-{uuid.uuid4().hex[:8]}"
+    cmd = [
+        "systemd-run",
+        "--unit", unit_name,
+        "--description", "LLM Council self-update",
+        "--collect",
+        "--property=WorkingDirectory=/opt/llm-council",
+        f"--property=StandardOutput=append:{log_path}",
+        f"--property=StandardError=append:{log_path}",
+        script_path,
+    ]
 
-        assert process.stdout is not None  # For type checkers
-        async for raw_line in process.stdout:
-            line = raw_line.decode(errors="replace").rstrip()
-            if line:
-                yield f"data: {json.dumps({'type': 'line', 'message': line})}\n\n"
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="systemd-run not available on host")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to launch update")
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"Failed to start update: {exc}")
 
-        return_code = await process.wait()
-        yield f"data: {json.dumps({'type': 'complete', 'code': return_code})}\n\n"
+    if process.returncode != 0:
+        detail = stderr.decode().strip() or stdout.decode().strip() or "Unknown error launching update"
+        raise HTTPException(status_code=500, detail=detail)
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    return {"status": "started", "unit": unit_name, "log_path": log_path}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])

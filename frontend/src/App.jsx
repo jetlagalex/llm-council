@@ -151,29 +151,20 @@ function App() {
     setIsUpdating(true);
     setUpdateLog([]);
     try {
-      await api.triggerUpdate((eventType, event) => {
-        if (eventType === 'line') {
-          // Keep a rolling log (last 200 lines) so sidebar stays light.
-          setUpdateLog((prev) => [...prev, event.message].slice(-200));
-        } else if (eventType === 'complete') {
-          if (event.code === 0) {
-            setUpdateStatus('Update completed successfully.');
-          } else {
-            setUpdateStatus(`Update failed (exit ${event.code}). Check logs.`);
-          }
-          setIsUpdating(false);
-        } else if (eventType === 'error') {
-          setUpdateStatus(`Update error: ${event.message}`);
-          setIsUpdating(false);
-        }
-      });
+      const result = await api.triggerUpdate();
+      setUpdateStatus(
+        'Update started. The app will restart; refresh after a minute if it disconnects.'
+      );
+      setUpdateLog([
+        `Systemd unit: ${result.unit}`,
+        `Logs: ${result.log_path}`,
+      ]);
     } catch (error) {
       console.error('Failed to start update:', error);
       setUpdateStatus('Failed to start update. Check server logs.');
-      setIsUpdating(false);
-    } finally {
-      setIsUpdating(false);
     }
+    // Mark as not updating after initiating to re-enable the button.
+    setIsUpdating(false);
   };
 
   // Kick off a council run and mirror the streaming SSE events into UI state.
