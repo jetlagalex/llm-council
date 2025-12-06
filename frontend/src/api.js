@@ -94,14 +94,37 @@ export const api = {
   /**
    * Trigger the server-side update script.
    */
-  async triggerUpdate() {
-    const response = await fetch(`${API_BASE}/api/update`, {
-      method: 'POST',
-    });
+  async triggerUpdate(onEvent) {
+    const response = await fetch(`${API_BASE}/api/update`, { method: 'POST' });
     if (!response.ok) {
       throw new Error('Failed to start update');
     }
-    return response.json();
+
+    // Stream SSE events so callers can surface progress logs.
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const evt of events) {
+        const line = evt.trim();
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        try {
+          const event = JSON.parse(data);
+          onEvent?.(event.type, event);
+        } catch (e) {
+          console.error('Failed to parse update SSE event chunk:', e, { chunk: data });
+        }
+      }
+    }
   },
 
   /**

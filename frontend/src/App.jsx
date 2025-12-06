@@ -18,6 +18,8 @@ function App() {
   );
   // Track update progress text so the sidebar can show quick feedback.
   const [updateStatus, setUpdateStatus] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateLog, setUpdateLog] = useState([]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -146,12 +148,31 @@ function App() {
   // Kick off the system update script without blocking the UI.
   const handleTriggerUpdate = async () => {
     setUpdateStatus('Starting update...');
+    setIsUpdating(true);
+    setUpdateLog([]);
     try {
-      const result = await api.triggerUpdate();
-      setUpdateStatus(`Update started (pid ${result.pid}).`);
+      await api.triggerUpdate((eventType, event) => {
+        if (eventType === 'line') {
+          // Keep a rolling log (last 200 lines) so sidebar stays light.
+          setUpdateLog((prev) => [...prev, event.message].slice(-200));
+        } else if (eventType === 'complete') {
+          if (event.code === 0) {
+            setUpdateStatus('Update completed successfully.');
+          } else {
+            setUpdateStatus(`Update failed (exit ${event.code}). Check logs.`);
+          }
+          setIsUpdating(false);
+        } else if (eventType === 'error') {
+          setUpdateStatus(`Update error: ${event.message}`);
+          setIsUpdating(false);
+        }
+      });
     } catch (error) {
       console.error('Failed to start update:', error);
       setUpdateStatus('Failed to start update. Check server logs.');
+      setIsUpdating(false);
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -295,6 +316,8 @@ function App() {
         onDeleteConversation={handleDeleteConversation}
         onTriggerUpdate={handleTriggerUpdate}
         updateStatus={updateStatus}
+        isUpdating={isUpdating}
+        updateLog={updateLog}
         isOpen={isSidebarOpen}
         isMobile={isMobile}
         onClose={() => setIsSidebarOpen(false)}

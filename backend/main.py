@@ -67,41 +67,54 @@ class Conversation(BaseModel):
     messages: List[Dict[str, Any]]
 
 
-class UpdateResponse(BaseModel):
-    """Response after triggering an update script run."""
-    status: str
-    pid: int
-
-
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
 
 
-@app.post("/api/update", response_model=UpdateResponse)
+@app.post("/api/update")
 async def run_update_script():
     """
-    Kick off the update script in the background so the caller returns immediately.
-    This assumes /opt/llm-council/update.sh performs a git pull and any setup.
+    Kick off the update script and stream its stdout/stderr as SSE events so the
+    frontend can show live progress (instead of looking frozen).
     """
     script_path = "/opt/llm-council/update.sh"
     if not os.path.exists(script_path):
         raise HTTPException(status_code=404, detail="Update script not found")
 
-    try:
-        # Spawn the script detached from the request to avoid blocking the API.
-        process = await asyncio.create_subprocess_exec(
-            script_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except PermissionError:
-        raise HTTPException(status_code=403, detail="Update script is not executable")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to start update: {exc}")
+    async def event_generator():
+        try:
+            # Stream stdout/stderr so the client can surface progress lines.
+            process = await asyncio.create_subprocess_exec(
+                script_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except PermissionError:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Update script is not executable'})}\n\n"
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to start update: {exc}'})}\n\n"
+            return
 
-    return {"status": "started", "pid": process.pid}
+        assert process.stdout is not None  # For type checkers
+        async for raw_line in process.stdout:
+            line = raw_line.decode(errors="replace").rstrip()
+            if line:
+                yield f"data: {json.dumps({'type': 'line', 'message': line})}\n\n"
+
+        return_code = await process.wait()
+        yield f"data: {json.dumps({'type': 'complete', 'code': return_code})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])

@@ -11,6 +11,8 @@ export default function Sidebar({
   onDeleteConversation,
   onTriggerUpdate,
   updateStatus,
+  isUpdating,
+  updateLog,
   isOpen,
   isMobile,
   onClose,
@@ -93,8 +95,13 @@ export default function Sidebar({
             + New Conversation
           </button>
           {/* Fire the backend update script without blocking navigation. */}
-          <button className="update-btn" onClick={onTriggerUpdate}>
-            Update App
+          <button
+            className="update-btn"
+            onClick={onTriggerUpdate}
+            disabled={isUpdating}
+            aria-busy={isUpdating}
+          >
+            {isUpdating ? 'Updating…' : 'Update App'}
           </button>
           {isMobile && (
             <button className="close-sidebar-btn" onClick={onClose}>
@@ -106,6 +113,15 @@ export default function Sidebar({
         {updateStatus && (
           <div className="update-status" title={updateStatus}>
             {updateStatus}
+          </div>
+        )}
+        {updateLog.length > 0 && (
+          <div className="update-log" aria-live="polite">
+            {updateLog.map((line, idx) => (
+              <div key={idx} className="update-log-line">
+                {line}
+              </div>
+            ))}
           </div>
         )}
       </div>
