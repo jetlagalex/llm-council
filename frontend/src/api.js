@@ -10,9 +10,12 @@ const envBase = (import.meta.env.VITE_API_BASE || '').trim().replace(/\/+$/, '')
 
 const computeHostPortBase = () => {
   if (typeof window === 'undefined') return 'http://localhost:8001';
-  const { protocol, hostname } = window.location;
+  const { protocol, hostname, port } = window.location;
   const host = hostname.includes(':') ? `[${hostname}]` : hostname; // IPv6 safe
-  return `${protocol}//${host}:8001`;
+  const isDev = port === '5173' || port === '4173';
+  // In dev, assume backend on 8001; in prod/default, use same origin as frontend.
+  if (isDev) return `${protocol}//${host}:8001`;
+  return `${protocol}//${host}${port ? `:${port}` : ''}`;
 };
 
 const API_BASE =
