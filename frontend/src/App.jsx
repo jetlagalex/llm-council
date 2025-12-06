@@ -408,7 +408,15 @@ function App() {
         ...prev,
         messages: prev.messages.slice(0, -2),
       }));
-      setSendError(error?.message || 'Failed to send. Verify your API key and model settings.');
+      const message = error?.message || 'Failed to send. Verify your API key and model settings.';
+      // Give a more helpful hint for network-layer failures.
+      if (message.toLowerCase().includes('network') || message.toLowerCase().includes('failed to fetch')) {
+        setSendError(
+          'Failed to reach the backend. Ensure the server is running and your API key/models are set in Settings.'
+        );
+      } else {
+        setSendError(message);
+      }
       setIsLoading(false);
     }
   };

@@ -157,16 +157,24 @@ export const api = {
    * @returns {Promise<void>}
    */
   async sendMessageStream(conversationId, content, onEvent) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
-      }
-    );
+    let response;
+    try {
+      response = await fetch(
+        `${API_BASE}/api/conversations/${conversationId}/message/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ content }),
+        }
+      );
+    } catch (networkErr) {
+      // Bubble up a clearer network error so the UI can show actionable help.
+      throw new Error(
+        `Network error talking to backend: ${networkErr?.message || 'Failed to fetch'}`
+      );
+    }
 
     if (!response.ok) {
       const text = await response.text();
