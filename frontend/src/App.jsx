@@ -92,6 +92,55 @@ function App() {
     }
   };
 
+  // Rename a conversation and keep both list and active view in sync.
+  const handleRenameConversation = async (id, currentTitle) => {
+    const proposedTitle = window.prompt(
+      'Enter a new name for this conversation',
+      currentTitle || 'New Conversation'
+    );
+    if (proposedTitle === null) return;
+
+    const trimmedTitle = proposedTitle.trim();
+    if (!trimmedTitle || trimmedTitle === currentTitle) return;
+
+    try {
+      await api.renameConversation(id, trimmedTitle);
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.id === id ? { ...conv, title: trimmedTitle } : conv
+        )
+      );
+      setCurrentConversation((prev) =>
+        prev && prev.id === id ? { ...prev, title: trimmedTitle } : prev
+      );
+    } catch (error) {
+      console.error('Failed to rename conversation:', error);
+    }
+  };
+
+  // Delete a conversation and choose a sensible fallback selection.
+  const handleDeleteConversation = async (id) => {
+    const confirmed = window.confirm(
+      'Delete this conversation and all messages?'
+    );
+    if (!confirmed) return;
+
+    try {
+      await api.deleteConversation(id);
+      setConversations((prev) => {
+        const updated = prev.filter((conv) => conv.id !== id);
+        if (currentConversationId === id) {
+          const fallbackId = updated[0]?.id || null;
+          setCurrentConversationId(fallbackId);
+          setCurrentConversation(null);
+        }
+        return updated;
+      });
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+    }
+  };
+
   // Kick off a council run and mirror the streaming SSE events into UI state.
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
@@ -228,6 +277,8 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
         isOpen={isSidebarOpen}
         isMobile={isMobile}
         onClose={() => setIsSidebarOpen(false)}

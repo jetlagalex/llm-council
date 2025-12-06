@@ -6,6 +6,7 @@
   flex-direction: column;
   height: 100%;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
 }
 
 /* Header: title + New Conversation button */
@@ -77,15 +78,84 @@
   border: 1px solid #4a90e2;
 }
 
+.conversation-top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .conversation-title {
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+.conversation-options {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0.65;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.conversation-options:hover {
+  background: #e7ecf3;
+  opacity: 1;
+}
+
+.conversation-item:hover .conversation-options {
+  opacity: 1;
+}
+
+.conversation-context-menu {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #dcdcdc;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  min-width: 180px;
+  z-index: 1200;
+  padding: 6px 0;
+}
+
+.context-menu-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.context-menu-item:hover {
+  background: #f0f4ff;
+  color: #1f5fbf;
+}
+
+.context-menu-item.delete {
+  color: #b00020;
+}
+
+.context-menu-item.delete:hover {
+  background: #ffe8ec;
+  color: #9b001b;
 }
 
 .close-sidebar-btn {

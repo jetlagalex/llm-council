@@ -181,6 +181,19 @@ def add_assistant_message(
 def update_conversation_title(conversation_id: str, title: str):
     """Update the title of a conversation."""
     with _connect() as conn:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE conversations SET title = ? WHERE id = ?", (title, conversation_id)
         )
+        return cur.rowcount > 0
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """Delete a conversation and all of its messages."""
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
+        )
+        cur = conn.execute(
+            "DELETE FROM conversations WHERE id = ?", (conversation_id,)
+        )
+        return cur.rowcount > 0
