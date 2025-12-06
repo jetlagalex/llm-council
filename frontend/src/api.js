@@ -169,7 +169,17 @@ export const api = {
     );
 
     if (!response.ok) {
-      throw new Error('Failed to send message');
+      const text = await response.text();
+      // Try to surface server-provided error details for clarity.
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed?.detail) {
+          throw new Error(parsed.detail);
+        }
+      } catch (e) {
+        // fall through; e is either JSON parse error or raised above
+      }
+      throw new Error(text || 'Failed to send message');
     }
 
     const reader = response.body.getReader();

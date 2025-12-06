@@ -145,6 +145,30 @@ async def run_update_script():
     return {"status": "started", "unit": unit_name, "log_path": log_path}
 
 
+def _ensure_settings_ready() -> Dict[str, Any]:
+    """
+    Validate that settings contain an API key and at least one model.
+    Raises HTTPException if requirements are not met.
+    """
+    settings = storage.get_settings()
+    api_key = settings.get("openrouter_api_key") or OPENROUTER_API_KEY
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenRouter API key not set. Add it in Settings.")
+
+    council_models = settings.get("council_models") or COUNCIL_MODELS
+    chairman = settings.get("chairman_model") or CHAIRMAN_MODEL
+    if not council_models:
+        raise HTTPException(status_code=400, detail="Council models not configured. Update Settings.")
+    if chairman not in council_models:
+        raise HTTPException(status_code=400, detail="Chairman must be one of the council models.")
+
+    return {
+        "api_key": api_key,
+        "council_models": council_models,
+        "chairman_model": chairman,
+    }
+
+
 @app.get("/api/settings", response_model=SettingsResponse)
 async def get_settings():
     """Expose current settings for the UI."""
@@ -266,6 +290,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
+    _ensure_settings_ready()
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
@@ -315,6 +340,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
+    _ensure_settings_ready()
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:

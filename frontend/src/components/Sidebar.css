@@ -25,11 +25,12 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: center;
 }
 
 .sidebar-actions.secondary {
   margin-top: 8px;
-  justify-content: flex-start;
+  justify-content: center;
   flex-wrap: wrap;
 }
 

@@ -408,7 +408,7 @@ function App() {
         ...prev,
         messages: prev.messages.slice(0, -2),
       }));
-      setSendError('Failed to send. Verify your API key and model settings.');
+      setSendError(error?.message || 'Failed to send. Verify your API key and model settings.');
       setIsLoading(false);
     }
   };
