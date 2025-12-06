@@ -13,6 +13,7 @@ export default function Sidebar({
   updateStatus,
   isUpdating,
   updateLog,
+  onOpenSettings,
   isOpen,
   isMobile,
   onClose,
@@ -102,6 +103,9 @@ export default function Sidebar({
             aria-busy={isUpdating}
           >
             {isUpdating ? 'Updating…' : 'Update App'}
+          </button>
+          <button className="settings-btn" onClick={onOpenSettings}>
+            Settings
           </button>
           {isMobile && (
             <button className="close-sidebar-btn" onClick={onClose}>

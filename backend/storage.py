@@ -41,6 +41,14 @@ def _ensure_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
 
 
 # Initialize database on module import
@@ -112,6 +120,48 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 def save_conversation(_: Dict[str, Any]):
     """No-op retained for compatibility."""
     return None
+
+
+def get_settings() -> Dict[str, Any]:
+    """Load persisted settings, falling back to defaults and env vars."""
+    from .config import OPENROUTER_API_KEY, COUNCIL_MODELS, CHAIRMAN_MODEL  # Lazy import to avoid cycles
+
+    defaults = {
+        "openrouter_api_key": OPENROUTER_API_KEY or "",
+        "council_models": COUNCIL_MODELS,
+        "chairman_model": CHAIRMAN_MODEL,
+    }
+
+    with _connect() as conn:
+        cur = conn.execute(
+            "SELECT value FROM settings WHERE key = 'core'"
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return defaults
+
+    try:
+        saved = json.loads(row[0])
+    except Exception:
+        return defaults
+
+    # Merge defaults with saved values, preferring saved when present
+    merged = {
+        "openrouter_api_key": saved.get("openrouter_api_key", defaults["openrouter_api_key"]),
+        "council_models": saved.get("council_models", defaults["council_models"]),
+        "chairman_model": saved.get("chairman_model", defaults["chairman_model"]),
+    }
+    return merged
+
+
+def update_settings(settings: Dict[str, Any]):
+    """Persist settings (overwrites the single settings row)."""
+    with _connect() as conn:
+        conn.execute(
+            "REPLACE INTO settings (key, value) VALUES ('core', ?)",
+            (json.dumps(settings),),
+        )
 
 
 def list_conversations() -> List[Dict[str, Any]]:

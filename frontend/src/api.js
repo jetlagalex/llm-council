@@ -103,6 +103,33 @@ export const api = {
   },
 
   /**
+   * Fetch server settings (models, API key state).
+   */
+  async getSettings() {
+    const response = await fetch(`${API_BASE}/api/settings`);
+    if (!response.ok) {
+      throw new Error('Failed to load settings');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update server settings.
+   */
+  async updateSettings(payload) {
+    const response = await fetch(`${API_BASE}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to update settings');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content) {

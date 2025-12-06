@@ -2,7 +2,8 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+from .config import OPENROUTER_API_URL, OPENROUTER_API_KEY
+from .storage import get_settings
 
 
 async def query_model(
@@ -21,8 +22,11 @@ async def query_model(
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
+    settings = get_settings()
+    api_key = settings.get("openrouter_api_key") or OPENROUTER_API_KEY
+
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 

@@ -72,6 +72,25 @@
   cursor: not-allowed;
 }
 
+.settings-btn {
+  padding: 10px 12px;
+  background: #eef3ff;
+  border: 1px solid #b7c9ff;
+  border-radius: 6px;
+  color: #3050b3;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+
+.settings-btn:hover {
+  background: #dce7ff;
+  border-color: #8aa8ff;
+  color: #233a8c;
+}
+
 .update-status {
   margin-top: 8px;
   font-size: 12px;

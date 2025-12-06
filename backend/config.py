@@ -9,13 +9,16 @@ load_dotenv()
 # OpenRouter API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# Council members - list of OpenRouter model identifiers
+# Council members - list of OpenRouter model identifiers (defaults)
 COUNCIL_MODELS = [
     "openai/gpt-5.1",
     "google/gemini-3-pro-preview",
     "anthropic/claude-sonnet-4.5",
     "x-ai/grok-4",
 ]
+
+# Allow listing the recommended/supported models separately (for UI)
+AVAILABLE_MODELS = COUNCIL_MODELS
 
 # Chairman model - synthesizes final response
 CHAIRMAN_MODEL = "google/gemini-3-pro-preview"

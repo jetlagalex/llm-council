@@ -2,8 +2,8 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
 import uuid
 import json
 import asyncio
@@ -12,6 +12,7 @@ import os
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .config import AVAILABLE_MODELS, COUNCIL_MODELS, CHAIRMAN_MODEL, OPENROUTER_API_KEY
 
 app = FastAPI(title="LLM Council API")
 
@@ -73,6 +74,25 @@ class UpdateStartResponse(BaseModel):
     log_path: str
 
 
+class SettingsResponse(BaseModel):
+    """Current configurable settings."""
+    has_openrouter_key: bool
+    openrouter_key_last4: Optional[str]
+    council_models: List[str]
+    chairman_model: str
+    available_models: List[str]
+
+
+class UpdateSettingsRequest(BaseModel):
+    """Update settings payload."""
+    openrouter_api_key: Optional[str] = Field(
+        default=None,
+        description="Provide to replace, '' to clear, or null to keep current.",
+    )
+    council_models: List[str]
+    chairman_model: str
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
@@ -123,6 +143,63 @@ async def run_update_script():
         raise HTTPException(status_code=500, detail=detail)
 
     return {"status": "started", "unit": unit_name, "log_path": log_path}
+
+
+@app.get("/api/settings", response_model=SettingsResponse)
+async def get_settings():
+    """Expose current settings for the UI."""
+    settings = storage.get_settings()
+    key = settings.get("openrouter_api_key") or ""
+    last4 = key[-4:] if key else None
+
+    return SettingsResponse(
+        has_openrouter_key=bool(key),
+        openrouter_key_last4=last4,
+        council_models=settings.get("council_models", COUNCIL_MODELS),
+        chairman_model=settings.get("chairman_model", CHAIRMAN_MODEL),
+        available_models=AVAILABLE_MODELS,
+    )
+
+
+@app.put("/api/settings", response_model=SettingsResponse)
+async def update_settings(request: UpdateSettingsRequest):
+    """Update configurable settings with validation."""
+    if not request.council_models:
+        raise HTTPException(status_code=400, detail="At least one council model is required")
+    if len(request.council_models) > 4:
+        raise HTTPException(status_code=400, detail="Council limited to 4 members")
+    if request.chairman_model not in request.council_models:
+        raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
+
+    # Optional: ensure models are from the allowed list
+    invalid_models = [m for m in request.council_models if m not in AVAILABLE_MODELS]
+    if request.chairman_model not in AVAILABLE_MODELS:
+        invalid_models.append(request.chairman_model)
+    if invalid_models:
+        raise HTTPException(status_code=400, detail=f"Unsupported model(s): {', '.join(sorted(set(invalid_models)))}")
+
+    current = storage.get_settings()
+    # openrouter_api_key=None -> keep; '' -> clear; string -> replace
+    if request.openrouter_api_key is None:
+        new_key = current.get("openrouter_api_key", OPENROUTER_API_KEY or "")
+    else:
+        new_key = request.openrouter_api_key.strip()
+
+    new_settings = {
+        "openrouter_api_key": new_key,
+        "council_models": request.council_models,
+        "chairman_model": request.chairman_model,
+    }
+    storage.update_settings(new_settings)
+
+    last4 = new_key[-4:] if new_key else None
+    return SettingsResponse(
+        has_openrouter_key=bool(new_key),
+        openrouter_key_last4=last4,
+        council_models=request.council_models,
+        chairman_model=request.chairman_model,
+        available_models=AVAILABLE_MODELS,
+    )
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])

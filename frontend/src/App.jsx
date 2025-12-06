@@ -24,6 +24,23 @@ function App() {
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameError, setRenameError] = useState('');
+  // Settings modal state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
+  const [availableModels, setAvailableModels] = useState([]);
+  const [settingsForm, setSettingsForm] = useState({
+    council_models: [],
+    chairman_model: '',
+  });
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [removeApiKey, setRemoveApiKey] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [apiKeyLast4, setApiKeyLast4] = useState(null);
+  // Manage rename modal state to avoid browser-native prompts.
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
 
   // Load conversations on mount
   useEffect(() => {
@@ -179,6 +196,83 @@ function App() {
     setIsUpdating(false);
   };
 
+  // Open settings modal and fetch current values.
+  const handleOpenSettings = async () => {
+    setIsSettingsOpen(true);
+    setSettingsLoading(true);
+    setSettingsError('');
+    try {
+      const data = await api.getSettings();
+      setAvailableModels(data.available_models || []);
+      setSettingsForm({
+        council_models: data.council_models || [],
+        chairman_model: data.chairman_model || '',
+      });
+      setHasApiKey(Boolean(data.has_openrouter_key));
+      setApiKeyLast4(data.openrouter_key_last4);
+      setApiKeyInput('');
+      setRemoveApiKey(false);
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+      setSettingsError('Failed to load settings. Try again.');
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const handleToggleModel = (model) => {
+    setSettingsForm((prev) => {
+      const exists = prev.council_models.includes(model);
+      // Enforce max of 4 selections
+      if (!exists && prev.council_models.length >= 4) return prev;
+      const nextModels = exists
+        ? prev.council_models.filter((m) => m !== model)
+        : [...prev.council_models, model];
+      const nextChair = nextModels.includes(prev.chairman_model)
+        ? prev.chairman_model
+        : nextModels[0] || '';
+      return { ...prev, council_models: nextModels, chairman_model: nextChair };
+    });
+  };
+
+  const handleSaveSettings = async () => {
+    setSettingsError('');
+    if (!settingsForm.council_models.length) {
+      setSettingsError('Select at least one council member (max 4).');
+      return;
+    }
+    if (settingsForm.council_models.length > 4) {
+      setSettingsError('Council limited to 4 members.');
+      return;
+    }
+    if (!settingsForm.chairman_model) {
+      setSettingsError('Choose a chairman from the selected members.');
+      return;
+    }
+    try {
+      const payload = {
+        openrouter_api_key: removeApiKey ? '' : apiKeyInput.trim() || null,
+        council_models: settingsForm.council_models,
+        chairman_model: settingsForm.chairman_model,
+      };
+      const updated = await api.updateSettings(payload);
+      setHasApiKey(Boolean(updated.has_openrouter_key));
+      setApiKeyLast4(updated.openrouter_key_last4);
+      setSettingsForm({
+        council_models: updated.council_models,
+        chairman_model: updated.chairman_model,
+      });
+      setRemoveApiKey(false);
+      setApiKeyInput('');
+      setIsSettingsOpen(false);
+      // Clear update status so user knows settings saved
+      setUpdateStatus('Settings saved.');
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      setSettingsError(error.message || 'Failed to save settings.');
+    }
+  };
+
   // Kick off a council run and mirror the streaming SSE events into UI state.
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
@@ -321,6 +415,7 @@ function App() {
         updateStatus={updateStatus}
         isUpdating={isUpdating}
         updateLog={updateLog}
+        onOpenSettings={handleOpenSettings}
         isOpen={isSidebarOpen}
         isMobile={isMobile}
         onClose={() => setIsSidebarOpen(false)}
@@ -332,6 +427,103 @@ function App() {
         onOpenSidebar={() => setIsSidebarOpen(true)}
         isMobile={isMobile}
       />
+      {isSettingsOpen && (
+        <div className="settings-modal-backdrop" onClick={() => setIsSettingsOpen(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Settings</h3>
+            {settingsLoading ? (
+              <div className="settings-loading">Loading settings...</div>
+            ) : (
+              <>
+                <div className="settings-section">
+                  <div className="settings-row">
+                    <div>
+                      <div className="settings-label">OpenRouter API Key</div>
+                      <div className="settings-help">
+                        {hasApiKey
+                          ? `Key stored${apiKeyLast4 ? ` (••••${apiKeyLast4})` : ''}.`
+                          : 'No key stored.'}
+                      </div>
+                    </div>
+                    <label className="settings-inline">
+                      <input
+                        type="checkbox"
+                        checked={removeApiKey}
+                        onChange={(e) => setRemoveApiKey(e.target.checked)}
+                      />
+                      Remove stored key
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Enter new key (leave blank to keep current)"
+                    value={apiKeyInput}
+                    onChange={(e) => {
+                      setApiKeyInput(e.target.value);
+                      setRemoveApiKey(false);
+                    }}
+                  />
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-label">Council Members (max 4)</div>
+                  <div className="settings-help">
+                    Select which models should participate in the council.
+                  </div>
+                  <div className="model-grid">
+                    {availableModels.map((model) => {
+                      const checked = settingsForm.council_models.includes(model);
+                      const limitReached =
+                        !checked && settingsForm.council_models.length >= 4;
+                      return (
+                        <label key={model} className={`model-chip ${checked ? 'checked' : ''} ${limitReached ? 'disabled' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={limitReached}
+                            onChange={() => handleToggleModel(model)}
+                          />
+                          {model}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <div className="settings-label">Chairman</div>
+                  <div className="settings-help">
+                    Choose which selected model synthesizes the final response.
+                  </div>
+                  <select
+                    value={settingsForm.chairman_model}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({ ...prev, chairman_model: e.target.value }))
+                    }
+                  >
+                    {settingsForm.council_models.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {settingsError && <div className="settings-error">{settingsError}</div>}
+
+                <div className="settings-actions">
+                  <button className="rename-cancel" onClick={() => setIsSettingsOpen(false)}>
+                    Close
+                  </button>
+                  <button className="rename-save" onClick={handleSaveSettings}>
+                    Save Settings
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {renameTarget && (
         <div className="rename-modal-backdrop" onClick={() => setRenameTarget(null)}>
           <div className="rename-modal" onClick={(e) => e.stopPropagation()}>

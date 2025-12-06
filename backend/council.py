@@ -3,6 +3,7 @@
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .storage import get_settings
 
 
 def _build_context_messages(history: List[Dict[str, Any]], user_query: str, max_messages: int = 8) -> List[Dict[str, str]]:
@@ -40,7 +41,10 @@ async def stage1_collect_responses(
     messages = _build_context_messages(history, user_query)
 
     # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    settings = get_settings()
+    council_models = settings.get("council_models", COUNCIL_MODELS)
+
+    responses = await query_models_parallel(council_models, messages)
 
     # Format results
     stage1_results = []
@@ -117,7 +121,10 @@ Now provide your evaluation and ranking:"""
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    settings = get_settings()
+    council_models = settings.get("council_models", COUNCIL_MODELS)
+
+    responses = await query_models_parallel(council_models, messages)
 
     # Format results
     stage2_results = []
@@ -191,17 +198,20 @@ Provide a clear, well-reasoned final answer that represents the council's collec
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    settings = get_settings()
+    chairman_model = settings.get("chairman_model", CHAIRMAN_MODEL)
+
+    response = await query_model(chairman_model, messages)
 
     if response is None:
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": chairman_model,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
+        "model": chairman_model,
         "response": response.get('content', '')
     }
 
