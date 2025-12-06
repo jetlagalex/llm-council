@@ -9,6 +9,8 @@ export default function Sidebar({
   onNewConversation,
   onRenameConversation,
   onDeleteConversation,
+  onTriggerUpdate,
+  updateStatus,
   isOpen,
   isMobile,
   onClose,
@@ -90,12 +92,22 @@ export default function Sidebar({
           <button className="new-conversation-btn" onClick={onNewConversation}>
             + New Conversation
           </button>
+          {/* Fire the backend update script without blocking navigation. */}
+          <button className="update-btn" onClick={onTriggerUpdate}>
+            Update App
+          </button>
           {isMobile && (
             <button className="close-sidebar-btn" onClick={onClose}>
               Close
             </button>
           )}
         </div>
+        {/* Surface a short status so users know their click was received. */}
+        {updateStatus && (
+          <div className="update-status" title={updateStatus}>
+            {updateStatus}
+          </div>
+        )}
       </div>
 
       <div className="conversation-list">

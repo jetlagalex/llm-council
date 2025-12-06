@@ -92,6 +92,19 @@ export const api = {
   },
 
   /**
+   * Trigger the server-side update script.
+   */
+  async triggerUpdate() {
+    const response = await fetch(`${API_BASE}/api/update`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to start update');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message in a conversation.
    */
   async sendMessage(conversationId, content) {

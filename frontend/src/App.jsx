@@ -16,6 +16,8 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(
     typeof window !== 'undefined' ? window.innerWidth > 900 : true
   );
+  // Track update progress text so the sidebar can show quick feedback.
+  const [updateStatus, setUpdateStatus] = useState('');
 
   // Load conversations on mount
   useEffect(() => {
@@ -138,6 +140,18 @@ function App() {
       });
     } catch (error) {
       console.error('Failed to delete conversation:', error);
+    }
+  };
+
+  // Kick off the system update script without blocking the UI.
+  const handleTriggerUpdate = async () => {
+    setUpdateStatus('Starting update...');
+    try {
+      const result = await api.triggerUpdate();
+      setUpdateStatus(`Update started (pid ${result.pid}).`);
+    } catch (error) {
+      console.error('Failed to start update:', error);
+      setUpdateStatus('Failed to start update. Check server logs.');
     }
   };
 
@@ -279,6 +293,8 @@ function App() {
         onNewConversation={handleNewConversation}
         onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
+        onTriggerUpdate={handleTriggerUpdate}
+        updateStatus={updateStatus}
         isOpen={isSidebarOpen}
         isMobile={isMobile}
         onClose={() => setIsSidebarOpen(false)}

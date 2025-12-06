@@ -46,6 +46,32 @@
   border-color: #357abd;
 }
 
+.update-btn {
+  padding: 10px 12px;
+  background: #fff7e6;
+  border: 1px solid #ffb44d;
+  border-radius: 6px;
+  color: #b76a00;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+
+.update-btn:hover {
+  background: #ffe2b8;
+  border-color: #ff9b11;
+  color: #8c4f00;
+}
+
+.update-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #555;
+  line-height: 1.3;
+}
+
 /* Conversation list */
 .conversation-list {
   flex: 1;
