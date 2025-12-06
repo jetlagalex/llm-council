@@ -37,6 +37,8 @@ function App() {
   const [removeApiKey, setRemoveApiKey] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [apiKeyLast4, setApiKeyLast4] = useState(null);
+  // Surface send errors near the compose box.
+  const [sendError, setSendError] = useState('');
 
   // Load conversations on mount
   useEffect(() => {
@@ -98,6 +100,7 @@ function App() {
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
+      setCurrentConversation({ ...newConv, messages: [] });
       if (isMobile) {
         setIsSidebarOpen(false);
       }
@@ -274,6 +277,20 @@ function App() {
     if (!currentConversationId) return;
 
     setIsLoading(true);
+    setSendError('');
+    // Ensure we have a conversation object to append to (for brand new threads).
+    setCurrentConversation((prev) => {
+      if (prev) return prev;
+      const fallbackTitle =
+        conversations.find((c) => c.id === currentConversationId)?.title ||
+        'New Conversation';
+      return {
+        id: currentConversationId,
+        title: fallbackTitle,
+        messages: [],
+      };
+    });
+
     try {
       // Optimistically add user message to UI
       const userMessage = { role: 'user', content };
@@ -376,6 +393,7 @@ function App() {
 
           case 'error':
             console.error('Stream error:', event.message);
+            setSendError(event.message || 'Failed to send message. Check API key in Settings.');
             setIsLoading(false);
             break;
 
@@ -390,6 +408,7 @@ function App() {
         ...prev,
         messages: prev.messages.slice(0, -2),
       }));
+      setSendError('Failed to send. Verify your API key and model settings.');
       setIsLoading(false);
     }
   };
@@ -422,6 +441,8 @@ function App() {
         isLoading={isLoading}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         isMobile={isMobile}
+        errorMessage={sendError}
+        clearError={() => setSendError('')}
       />
       {isSettingsOpen && (
         <div className="settings-modal-backdrop" onClick={() => setIsSettingsOpen(false)}>

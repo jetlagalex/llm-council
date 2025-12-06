@@ -27,6 +27,12 @@
   align-items: center;
 }
 
+.sidebar-actions.secondary {
+  margin-top: 8px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
 /* New conversation button */
 .new-conversation-btn {
   width: 100%;

@@ -34,6 +34,16 @@ body,
   z-index: 900;
 }
 
+.input-error {
+  background: #ffeaea;
+  border: 1px solid #f5b5b5;
+  color: #8c1c1c;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
 .rename-modal-backdrop {
   position: fixed;
   inset: 0;

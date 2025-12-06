@@ -12,6 +12,8 @@ export default function ChatInterface({
   isLoading,
   onOpenSidebar,
   isMobile,
+  errorMessage,
+  clearError,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -29,6 +31,7 @@ export default function ChatInterface({
     if (input.trim() && !isLoading) {
       onSendMessage(input);
       setInput('');
+      clearError?.();
     }
   };
 
@@ -139,6 +142,11 @@ export default function ChatInterface({
       </div>
 
       <form className="input-form" onSubmit={handleSubmit}>
+        {errorMessage && (
+          <div className="input-error" role="alert">
+            {errorMessage}
+          </div>
+        )}
         <textarea
           className="message-input"
           placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"

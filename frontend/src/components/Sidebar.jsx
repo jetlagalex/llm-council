@@ -95,6 +95,8 @@ export default function Sidebar({
           <button className="new-conversation-btn" onClick={onNewConversation}>
             + New Conversation
           </button>
+        </div>
+        <div className="sidebar-actions secondary">
           {/* Fire the backend update script without blocking navigation. */}
           <button
             className="update-btn"
