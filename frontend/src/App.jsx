@@ -37,10 +37,6 @@ function App() {
   const [removeApiKey, setRemoveApiKey] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [apiKeyLast4, setApiKeyLast4] = useState(null);
-  // Manage rename modal state to avoid browser-native prompts.
-  const [renameTarget, setRenameTarget] = useState(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [renameError, setRenameError] = useState('');
 
   // Load conversations on mount
   useEffect(() => {
