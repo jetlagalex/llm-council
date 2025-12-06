@@ -1,9 +1,91 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import './ChatInterface.css';
+
+// Memoized message list so typing in the composer doesn't re-render
+// the entire transcript (ReactMarkdown parsing is expensive).
+const MessagesView = memo(function MessagesView({ messages = [], isLoading }) {
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  return (
+    <div className="messages-container">
+      {messages.length === 0 ? (
+        <div className="empty-state">
+          <h2>Start a conversation</h2>
+          <p>Ask a question to consult the LLM Council</p>
+        </div>
+      ) : (
+        messages.map((msg, index) => (
+          <div key={index} className="message-group">
+            {msg.role === 'user' ? (
+              <div className="user-message">
+                <div className="message-label">You</div>
+                <div className="message-content">
+                  <div className="markdown-content">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="assistant-message">
+                <div className="message-label">LLM Council</div>
+
+                {/* Stage 1 */}
+                {msg.loading?.stage1 && (
+                  <div className="stage-loading">
+                    <div className="spinner"></div>
+                    <span>Running Stage 1: Collecting individual responses...</span>
+                  </div>
+                )}
+                {msg.stage1 && <Stage1 responses={msg.stage1} />}
+
+                {/* Stage 2 */}
+                {msg.loading?.stage2 && (
+                  <div className="stage-loading">
+                    <div className="spinner"></div>
+                    <span>Running Stage 2: Peer rankings...</span>
+                  </div>
+                )}
+                {msg.stage2 && (
+                  <Stage2
+                    rankings={msg.stage2}
+                    labelToModel={msg.metadata?.label_to_model}
+                    aggregateRankings={msg.metadata?.aggregate_rankings}
+                  />
+                )}
+
+                {/* Stage 3 */}
+                {msg.loading?.stage3 && (
+                  <div className="stage-loading">
+                    <div className="spinner"></div>
+                    <span>Running Stage 3: Final synthesis...</span>
+                  </div>
+                )}
+                {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+
+      {isLoading && (
+        <div className="loading-indicator">
+          <div className="spinner"></div>
+          <span>Consulting the council...</span>
+        </div>
+      )}
+
+      <div ref={messagesEndRef} />
+    </div>
+  );
+});
 
 // Shows the conversation thread and wiring for the compose box.
 export default function ChatInterface({
@@ -16,15 +98,6 @@ export default function ChatInterface({
   clearError,
 }) {
   const [input, setInput] = useState('');
-  const messagesEndRef = useRef(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [conversation]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -71,75 +144,7 @@ export default function ChatInterface({
         </div>
       </div>
 
-      <div className="messages-container">
-        {conversation.messages.length === 0 ? (
-          <div className="empty-state">
-            <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
-          </div>
-        ) : (
-          conversation.messages.map((msg, index) => (
-            <div key={index} className="message-group">
-              {msg.role === 'user' ? (
-                <div className="user-message">
-                  <div className="message-label">You</div>
-                  <div className="message-content">
-                    <div className="markdown-content">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="assistant-message">
-                  <div className="message-label">LLM Council</div>
-
-                  {/* Stage 1 */}
-                  {msg.loading?.stage1 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
-                    </div>
-                  )}
-                  {msg.stage1 && <Stage1 responses={msg.stage1} />}
-
-                  {/* Stage 2 */}
-                  {msg.loading?.stage2 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
-                    </div>
-                  )}
-                  {msg.stage2 && (
-                    <Stage2
-                      rankings={msg.stage2}
-                      labelToModel={msg.metadata?.label_to_model}
-                      aggregateRankings={msg.metadata?.aggregate_rankings}
-                    />
-                  )}
-
-                  {/* Stage 3 */}
-                  {msg.loading?.stage3 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
-                    </div>
-                  )}
-                  {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
-                </div>
-              )}
-            </div>
-          ))
-        )}
-
-        {isLoading && (
-          <div className="loading-indicator">
-            <div className="spinner"></div>
-            <span>Consulting the council...</span>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
+      <MessagesView messages={conversation.messages} isLoading={isLoading} />
 
       <form className="input-form" onSubmit={handleSubmit}>
         {errorMessage && (
