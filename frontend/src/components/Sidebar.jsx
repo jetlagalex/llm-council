@@ -75,7 +75,7 @@ export default function Sidebar({
   const handleRename = () => {
     if (!contextMenu.conversation) return;
     // Delegate rename to parent so state stays centralized.
-    onRenameConversation(contextMenu.conversation.id, contextMenu.conversation.title);
+    onRenameConversation(contextMenu.conversation);
     setContextMenu((prev) => ({ ...prev, visible: false, conversation: null }));
   };
 

@@ -20,6 +20,10 @@ function App() {
   const [updateStatus, setUpdateStatus] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateLog, setUpdateLog] = useState([]);
+  // Manage rename modal state to avoid browser-native prompts.
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
 
   // Load conversations on mount
   useEffect(() => {
@@ -96,29 +100,37 @@ function App() {
     }
   };
 
-  // Rename a conversation and keep both list and active view in sync.
-  const handleRenameConversation = async (id, currentTitle) => {
-    const proposedTitle = window.prompt(
-      'Enter a new name for this conversation',
-      currentTitle || 'New Conversation'
-    );
-    if (proposedTitle === null) return;
+  // Open a custom rename modal instead of the browser prompt.
+  const handleRenameConversation = (conversation) => {
+    if (!conversation) return;
+    setRenameTarget(conversation);
+    setRenameValue(conversation.title || 'New Conversation');
+    setRenameError('');
+  };
 
-    const trimmedTitle = proposedTitle.trim();
-    if (!trimmedTitle || trimmedTitle === currentTitle) return;
+  // Persist the rename and keep list + active conversation in sync.
+  const submitRename = async () => {
+    const trimmedTitle = renameValue.trim();
+    if (!trimmedTitle) {
+      setRenameError('Title cannot be empty.');
+      return;
+    }
+    if (!renameTarget) return;
 
     try {
-      await api.renameConversation(id, trimmedTitle);
+      await api.renameConversation(renameTarget.id, trimmedTitle);
       setConversations((prev) =>
         prev.map((conv) =>
-          conv.id === id ? { ...conv, title: trimmedTitle } : conv
+          conv.id === renameTarget.id ? { ...conv, title: trimmedTitle } : conv
         )
       );
       setCurrentConversation((prev) =>
-        prev && prev.id === id ? { ...prev, title: trimmedTitle } : prev
+        prev && prev.id === renameTarget.id ? { ...prev, title: trimmedTitle } : prev
       );
+      setRenameTarget(null);
     } catch (error) {
       console.error('Failed to rename conversation:', error);
+      setRenameError('Rename failed. Please try again.');
     }
   };
 
@@ -320,6 +332,34 @@ function App() {
         onOpenSidebar={() => setIsSidebarOpen(true)}
         isMobile={isMobile}
       />
+      {renameTarget && (
+        <div className="rename-modal-backdrop" onClick={() => setRenameTarget(null)}>
+          <div className="rename-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Rename Conversation</h3>
+            <p className="rename-modal-subtitle">
+              Give this thread a descriptive title for later.
+            </p>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => {
+                setRenameValue(e.target.value);
+                setRenameError('');
+              }}
+              autoFocus
+            />
+            {renameError && <div className="rename-error">{renameError}</div>}
+            <div className="rename-actions">
+              <button className="rename-cancel" onClick={() => setRenameTarget(null)}>
+                Cancel
+              </button>
+              <button className="rename-save" onClick={submitRename}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
