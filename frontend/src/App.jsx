@@ -29,6 +29,9 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsError, setSettingsError] = useState('');
   const [availableModels, setAvailableModels] = useState([]);
+  // Track ad-hoc models users add so they can expand the council roster.
+  const [newModelInput, setNewModelInput] = useState('');
+  const [addModelError, setAddModelError] = useState('');
   const [settingsForm, setSettingsForm] = useState({
     council_models: [],
     chairman_model: '',
@@ -211,12 +214,30 @@ function App() {
       setApiKeyLast4(data.openrouter_key_last4);
       setApiKeyInput('');
       setRemoveApiKey(false);
+      setNewModelInput('');
+      setAddModelError('');
     } catch (error) {
       console.error('Failed to load settings:', error);
       setSettingsError('Failed to load settings. Try again.');
     } finally {
       setSettingsLoading(false);
     }
+  };
+
+  // Allow adding custom OpenRouter model IDs to the available council roster.
+  const handleAddModel = () => {
+    const trimmed = newModelInput.trim();
+    if (!trimmed) {
+      setAddModelError('Enter an OpenRouter model id to add.');
+      return;
+    }
+    if (availableModels.includes(trimmed)) {
+      setAddModelError('That model is already listed.');
+      return;
+    }
+    setAvailableModels((prev) => [...prev, trimmed]);
+    setAddModelError('');
+    setNewModelInput('');
   };
 
   const handleToggleModel = (model) => {
@@ -249,14 +270,24 @@ function App() {
       return;
     }
     try {
+      // Normalize and deduplicate the available list before persisting it.
+      const cleanedAvailable = Array.from(
+        new Set(
+          availableModels
+            .map((model) => model.trim())
+            .filter(Boolean)
+        )
+      );
       const payload = {
         openrouter_api_key: removeApiKey ? '' : apiKeyInput.trim() || null,
         council_models: settingsForm.council_models,
         chairman_model: settingsForm.chairman_model,
+        available_models: cleanedAvailable,
       };
       const updated = await api.updateSettings(payload);
       setHasApiKey(Boolean(updated.has_openrouter_key));
       setApiKeyLast4(updated.openrouter_key_last4);
+      setAvailableModels(updated.available_models || cleanedAvailable);
       setSettingsForm({
         council_models: updated.council_models,
         chairman_model: updated.chairman_model,
@@ -495,6 +526,29 @@ function App() {
                   <div className="settings-help">
                     Select which models should participate in the council.
                   </div>
+                  <div className="model-add-row">
+                    <input
+                      type="text"
+                      placeholder="Add another OpenRouter model (e.g., anthropic/claude-3.5)"
+                      value={newModelInput}
+                      onChange={(e) => {
+                        setNewModelInput(e.target.value);
+                        setAddModelError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddModel();
+                        }
+                      }}
+                    />
+                    <button className="model-add-btn" onClick={handleAddModel}>
+                      Add Model
+                    </button>
+                  </div>
+                  {addModelError && (
+                    <div className="settings-field-error">{addModelError}</div>
+                  )}
                   <div className="model-grid">
                     {availableModels.map((model) => {
                       const checked = settingsForm.council_models.includes(model);

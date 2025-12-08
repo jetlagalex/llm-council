@@ -124,12 +124,14 @@ def save_conversation(_: Dict[str, Any]):
 
 def get_settings() -> Dict[str, Any]:
     """Load persisted settings, falling back to defaults and env vars."""
-    from .config import OPENROUTER_API_KEY, COUNCIL_MODELS, CHAIRMAN_MODEL  # Lazy import to avoid cycles
+    # Lazy import avoids circular references when config pulls from storage later.
+    from .config import OPENROUTER_API_KEY, COUNCIL_MODELS, CHAIRMAN_MODEL, AVAILABLE_MODELS
 
     defaults = {
         "openrouter_api_key": OPENROUTER_API_KEY or "",
         "council_models": COUNCIL_MODELS,
         "chairman_model": CHAIRMAN_MODEL,
+        "available_models": AVAILABLE_MODELS,
     }
 
     with _connect() as conn:
@@ -151,6 +153,7 @@ def get_settings() -> Dict[str, Any]:
         "openrouter_api_key": saved.get("openrouter_api_key", defaults["openrouter_api_key"]),
         "council_models": saved.get("council_models", defaults["council_models"]),
         "chairman_model": saved.get("chairman_model", defaults["chairman_model"]),
+        "available_models": saved.get("available_models", defaults["available_models"]),
     }
     return merged
 

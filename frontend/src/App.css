@@ -205,6 +205,33 @@ body,
   box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15);
 }
 
+.model-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.model-add-row input {
+  flex: 1;
+}
+
+.model-add-btn {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #4a90e2;
+  background: #4a90e2;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.model-add-btn:hover {
+  background: #357abd;
+  border-color: #357abd;
+}
+
 .model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -235,6 +262,12 @@ body,
   color: #b00020;
   font-size: 13px;
   margin-top: 4px;
+}
+
+.settings-field-error {
+  color: #b00020;
+  font-size: 12px;
+  margin-bottom: 4px;
 }
 
 .settings-actions {

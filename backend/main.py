@@ -92,6 +92,10 @@ class UpdateSettingsRequest(BaseModel):
     )
     council_models: List[str]
     chairman_model: str
+    available_models: Optional[List[str]] = Field(
+        default=None,
+        description="Optional list of available council choices, merged with defaults.",
+    )
 
 
 @app.get("/")
@@ -170,40 +174,81 @@ def _ensure_settings_ready() -> Dict[str, Any]:
     }
 
 
+def _normalize_models(models: List[str]) -> List[str]:
+    """
+    Trim, deduplicate, and preserve order for a list of model identifiers.
+    Empty entries are discarded so validation only works with real IDs.
+    """
+    seen = set()
+    normalized: List[str] = []
+    for model in models:
+        cleaned = model.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        normalized.append(cleaned)
+        seen.add(cleaned)
+    return normalized
+
+
+def _build_available_models(
+    settings: Dict[str, Any],
+    extras: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Merge default/recommended models with anything persisted plus any ad-hoc
+    additions (e.g., newly selected models) while keeping ordering stable.
+    """
+    existing = settings.get("available_models", [])
+    merged: List[str] = [*AVAILABLE_MODELS, *existing]
+    if extras:
+        merged.extend(extras)
+    return _normalize_models(merged)
+
+
 @app.get("/api/settings", response_model=SettingsResponse)
 async def get_settings():
     """Expose current settings for the UI."""
     settings = storage.get_settings()
     key = settings.get("openrouter_api_key") or ""
     last4 = key[-4:] if key else None
+    available_models = _build_available_models(settings)
 
     return SettingsResponse(
         has_openrouter_key=bool(key),
         openrouter_key_last4=last4,
         council_models=settings.get("council_models", COUNCIL_MODELS),
         chairman_model=settings.get("chairman_model", CHAIRMAN_MODEL),
-        available_models=AVAILABLE_MODELS,
+        available_models=available_models,
     )
 
 
 @app.put("/api/settings", response_model=SettingsResponse)
 async def update_settings(request: UpdateSettingsRequest):
     """Update configurable settings with validation."""
-    if not request.council_models:
+    normalized_council = _normalize_models(request.council_models)
+    chairman_model = request.chairman_model.strip()
+
+    if not normalized_council:
         raise HTTPException(status_code=400, detail="At least one council model is required")
-    if len(request.council_models) > 4:
+    if len(normalized_council) > 4:
         raise HTTPException(status_code=400, detail="Council limited to 4 members")
-    if request.chairman_model not in request.council_models:
+    if not chairman_model:
+        raise HTTPException(status_code=400, detail="Chairman model is required")
+    if chairman_model not in normalized_council:
         raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
 
-    # Optional: ensure models are from the allowed list
-    invalid_models = [m for m in request.council_models if m not in AVAILABLE_MODELS]
-    if request.chairman_model not in AVAILABLE_MODELS:
-        invalid_models.append(request.chairman_model)
-    if invalid_models:
-        raise HTTPException(status_code=400, detail=f"Unsupported model(s): {', '.join(sorted(set(invalid_models)))}")
-
     current = storage.get_settings()
+    # If the client passes an explicit list of available models, respect it.
+    base_available = (
+        request.available_models
+        if request.available_models is not None
+        else current.get("available_models", [])
+    )
+    available_models = _build_available_models(
+        {**current, "available_models": base_available},
+        [*normalized_council, chairman_model],
+    )
+
     # openrouter_api_key=None -> keep; '' -> clear; string -> replace
     if request.openrouter_api_key is None:
         new_key = current.get("openrouter_api_key", OPENROUTER_API_KEY or "")
@@ -212,8 +257,9 @@ async def update_settings(request: UpdateSettingsRequest):
 
     new_settings = {
         "openrouter_api_key": new_key,
-        "council_models": request.council_models,
-        "chairman_model": request.chairman_model,
+        "council_models": normalized_council,
+        "chairman_model": chairman_model,
+        "available_models": available_models,
     }
     storage.update_settings(new_settings)
 
@@ -221,9 +267,9 @@ async def update_settings(request: UpdateSettingsRequest):
     return SettingsResponse(
         has_openrouter_key=bool(new_key),
         openrouter_key_last4=last4,
-        council_models=request.council_models,
-        chairman_model=request.chairman_model,
-        available_models=AVAILABLE_MODELS,
+        council_models=normalized_council,
+        chairman_model=chairman_model,
+        available_models=available_models,
     )
 
 
