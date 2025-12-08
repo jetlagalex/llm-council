@@ -37,13 +37,13 @@ export const api = {
   /**
    * Create a new conversation.
    */
-  async createConversation() {
+  async createConversation(councilKey) {
     const response = await fetch(`${API_BASE}/api/conversations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ council_key: councilKey || null }),
     });
     if (!response.ok) {
       throw new Error('Failed to create conversation');
@@ -128,6 +128,79 @@ export const api = {
     if (!response.ok) {
       const errText = await response.text();
       throw new Error(errText || 'Failed to update settings');
+    }
+    return response.json();
+  },
+
+  /**
+    * List all council profiles.
+    */
+  async listCouncils() {
+    const response = await fetch(`${API_BASE}/api/councils`);
+    if (!response.ok) {
+      throw new Error('Failed to load councils');
+    }
+    return response.json();
+  },
+
+  /**
+   * Create a new council profile.
+   */
+  async createCouncil(payload) {
+    const response = await fetch(`${API_BASE}/api/councils`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to create council');
+    }
+    return response.json();
+  },
+
+  /**
+   * Update an existing council profile.
+   */
+  async updateCouncil(key, payload) {
+    const response = await fetch(`${API_BASE}/api/councils/${key}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to update council');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a council profile.
+   */
+  async deleteCouncil(key) {
+    const response = await fetch(`${API_BASE}/api/councils/${key}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to delete council');
+    }
+    return response.json();
+  },
+
+  /**
+   * Change which council a conversation uses.
+   */
+  async setConversationCouncil(conversationId, councilKey) {
+    const response = await fetch(`${API_BASE}/api/conversations/${conversationId}/council`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ council_key: councilKey }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to update conversation council');
     }
     return response.json();
   },

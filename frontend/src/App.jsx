@@ -29,6 +29,12 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsError, setSettingsError] = useState('');
   const [availableModels, setAvailableModels] = useState([]);
+  const [councils, setCouncils] = useState([]);
+  const [selectedCouncilKey, setSelectedCouncilKey] = useState('default');
+  const [editingCouncilKey, setEditingCouncilKey] = useState('default');
+  const [editingCouncilName, setEditingCouncilName] = useState('General');
+  const [isNewCouncil, setIsNewCouncil] = useState(false);
+  const [councilError, setCouncilError] = useState('');
   // Track ad-hoc models users add so they can expand the council roster.
   const [newModelInput, setNewModelInput] = useState('');
   const [addModelError, setAddModelError] = useState('');
@@ -46,6 +52,7 @@ function App() {
   // Load conversations on mount
   useEffect(() => {
     loadConversations();
+    loadCouncils();
   }, []);
 
   // Track viewport size for mobile layout
@@ -69,12 +76,32 @@ function App() {
     }
   }, [currentConversationId]);
 
+  const loadCouncils = async () => {
+    try {
+      const councilList = await api.listCouncils();
+      setCouncils(councilList);
+      if (councilList.length > 0) {
+        const fallbackKey =
+          councilList.find((c) => c.key === selectedCouncilKey)?.key ||
+          councilList[0].key;
+        setSelectedCouncilKey(fallbackKey);
+      }
+    } catch (error) {
+      console.error('Failed to load councils:', error);
+    }
+  };
+
   const loadConversations = async () => {
     try {
       const convs = await api.listConversations();
-      setConversations(convs);
+      const normalized = convs.map((conv) => ({
+        ...conv,
+        council_key: conv.council_key || 'default',
+      }));
+      setConversations(normalized);
       if (!currentConversationId && convs.length > 0) {
-        setCurrentConversationId(convs[0].id);
+        setCurrentConversationId(normalized[0].id);
+        setSelectedCouncilKey(normalized[0].council_key || 'default');
       }
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -85,6 +112,12 @@ function App() {
     try {
       const conv = await api.getConversation(id);
       setCurrentConversation(conv);
+      if (conv?.council_key) {
+        setSelectedCouncilKey(conv.council_key);
+      }
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, council_key: conv.council_key || c.council_key } : c))
+      );
     } catch (error) {
       console.error('Failed to load conversation:', error);
     }
@@ -92,18 +125,25 @@ function App() {
 
   const handleNewConversation = async () => {
     try {
-      const newConv = await api.createConversation();
+      const preferredCouncil =
+        councils.find((council) => council.key === selectedCouncilKey)?.key ||
+        councils[0]?.key ||
+        'default';
+      const newConv = await api.createConversation(preferredCouncil);
+      const newCouncilKey = newConv.council_key || preferredCouncil || 'default';
       setConversations([
         {
           id: newConv.id,
           created_at: newConv.created_at,
           message_count: 0,
           title: newConv.title,
+          council_key: newCouncilKey,
         },
         ...conversations,
       ]);
       setCurrentConversationId(newConv.id);
-      setCurrentConversation({ ...newConv, messages: [] });
+      setCurrentConversation({ ...newConv, council_key: newCouncilKey, messages: [] });
+      setSelectedCouncilKey(newCouncilKey);
       if (isMobile) {
         setIsSidebarOpen(false);
       }
@@ -114,6 +154,10 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+    const match = conversations.find((conv) => conv.id === id);
+    if (match?.council_key) {
+      setSelectedCouncilKey(match.council_key);
+    }
     if (isMobile) {
       setIsSidebarOpen(false);
     }
@@ -153,6 +197,26 @@ function App() {
     }
   };
 
+  const handleChangeConversationCouncil = async (councilKey) => {
+    if (!currentConversationId) return;
+    try {
+      const updated = await api.setConversationCouncil(currentConversationId, councilKey);
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.id === currentConversationId ? { ...conv, council_key: updated.council_key } : conv
+        )
+      );
+      setCurrentConversation((prev) =>
+        prev ? { ...prev, council_key: updated.council_key } : prev
+      );
+      setSelectedCouncilKey(updated.council_key);
+      setUpdateStatus(`Council switched to ${updated.council_key}.`);
+    } catch (error) {
+      console.error('Failed to update conversation council:', error);
+      setSendError(error.message || 'Failed to update council.');
+    }
+  };
+
   // Delete a conversation and choose a sensible fallback selection.
   const handleDeleteConversation = async (id) => {
     const confirmed = window.confirm(
@@ -168,6 +232,14 @@ function App() {
           const fallbackId = updated[0]?.id || null;
           setCurrentConversationId(fallbackId);
           setCurrentConversation(null);
+          if (fallbackId) {
+            const fallback = updated.find((conv) => conv.id === fallbackId);
+            if (fallback?.council_key) {
+              setSelectedCouncilKey(fallback.council_key);
+            }
+          } else {
+            setSelectedCouncilKey('default');
+          }
         }
         return updated;
       });
@@ -205,10 +277,23 @@ function App() {
     setSettingsError('');
     try {
       const data = await api.getSettings();
+      const councilList = await api.listCouncils();
+      setCouncils(councilList);
       setAvailableModels(data.available_models || []);
+      const preferredCouncilKey =
+        currentConversation?.council_key ||
+        selectedCouncilKey ||
+        'default';
+      const activeCouncil =
+        councilList.find((c) => c.key === preferredCouncilKey) ||
+        councilList[0] ||
+        null;
+      setEditingCouncilKey(activeCouncil?.key || preferredCouncilKey || 'default');
+      setEditingCouncilName(activeCouncil?.name || 'General');
+      setIsNewCouncil(!activeCouncil);
       setSettingsForm({
-        council_models: data.council_models || [],
-        chairman_model: data.chairman_model || '',
+        council_models: activeCouncil?.council_models || data.council_models || [],
+        chairman_model: activeCouncil?.chairman_model || data.chairman_model || '',
       });
       setHasApiKey(Boolean(data.has_openrouter_key));
       setApiKeyLast4(data.openrouter_key_last4);
@@ -216,6 +301,7 @@ function App() {
       setRemoveApiKey(false);
       setNewModelInput('');
       setAddModelError('');
+      setCouncilError('');
     } catch (error) {
       console.error('Failed to load settings:', error);
       setSettingsError('Failed to load settings. Try again.');
@@ -240,6 +326,66 @@ function App() {
     setNewModelInput('');
   };
 
+  const handleSelectEditingCouncil = (key) => {
+    const council = councils.find((c) => c.key === key);
+    if (!council) return;
+    setEditingCouncilKey(council.key);
+    setEditingCouncilName(council.name);
+    setIsNewCouncil(false);
+    setSettingsForm({
+      council_models: council.council_models || [],
+      chairman_model: council.chairman_model || '',
+    });
+    setCouncilError('');
+    setAddModelError('');
+    setNewModelInput('');
+  };
+
+  const handleStartNewCouncil = () => {
+    const placeholderKey = `new-${Date.now()}`;
+    setEditingCouncilKey(placeholderKey);
+    setEditingCouncilName('New Council');
+    setIsNewCouncil(true);
+    setSettingsForm({
+      council_models: [],
+      chairman_model: '',
+    });
+    setCouncilError('');
+    setAddModelError('');
+    setNewModelInput('');
+  };
+
+  const handleDeleteCouncil = async () => {
+    if (isNewCouncil) {
+      setCouncilError('Save this council before deleting.');
+      return;
+    }
+    if (editingCouncilKey === 'default') {
+      setCouncilError('Default council cannot be deleted.');
+      return;
+    }
+    const confirmed = window.confirm('Delete this council? Conversations using it must switch first.');
+    if (!confirmed) return;
+    try {
+      await api.deleteCouncil(editingCouncilKey);
+      const latest = await api.listCouncils();
+      setCouncils(latest);
+      const fallback = latest.find((c) => c.key === 'default') || latest[0] || null;
+      if (fallback) {
+        handleSelectEditingCouncil(fallback.key);
+        setSelectedCouncilKey((prev) => (prev === editingCouncilKey ? fallback.key : prev));
+      } else {
+        setEditingCouncilKey('default');
+        setEditingCouncilName('General');
+        setSettingsForm({ council_models: [], chairman_model: '' });
+      }
+      setCouncilError('');
+    } catch (error) {
+      console.error('Failed to delete council:', error);
+      setCouncilError(error.message || 'Failed to delete council.');
+    }
+  };
+
   const handleToggleModel = (model) => {
     setSettingsForm((prev) => {
       const exists = prev.council_models.includes(model);
@@ -257,6 +403,7 @@ function App() {
 
   const handleSaveSettings = async () => {
     setSettingsError('');
+    setCouncilError('');
     if (!settingsForm.council_models.length) {
       setSettingsError('Select at least one council member (max 4).');
       return;
@@ -278,20 +425,50 @@ function App() {
             .filter(Boolean)
         )
       );
+      const councilName = editingCouncilName.trim() || 'Untitled Council';
+
+      let savedCouncil;
+      if (isNewCouncil) {
+        savedCouncil = await api.createCouncil({
+          name: councilName,
+          council_models: settingsForm.council_models,
+          chairman_model: settingsForm.chairman_model,
+        });
+      } else {
+        savedCouncil = await api.updateCouncil(editingCouncilKey, {
+          name: councilName,
+          council_models: settingsForm.council_models,
+          chairman_model: settingsForm.chairman_model,
+        });
+      }
+
+      const latestCouncils = await api.listCouncils();
+      setCouncils(latestCouncils);
+
+      const defaultCouncil =
+        latestCouncils.find((council) => council.key === 'default') || savedCouncil;
+      const settingsCouncil = defaultCouncil || savedCouncil;
+
       const payload = {
         openrouter_api_key: removeApiKey ? '' : apiKeyInput.trim() || null,
-        council_models: settingsForm.council_models,
-        chairman_model: settingsForm.chairman_model,
+        council_models: settingsCouncil?.council_models || settingsForm.council_models,
+        chairman_model: settingsCouncil?.chairman_model || settingsForm.chairman_model,
         available_models: cleanedAvailable,
       };
+
       const updated = await api.updateSettings(payload);
       setHasApiKey(Boolean(updated.has_openrouter_key));
       setApiKeyLast4(updated.openrouter_key_last4);
       setAvailableModels(updated.available_models || cleanedAvailable);
+
       setSettingsForm({
-        council_models: updated.council_models,
-        chairman_model: updated.chairman_model,
+        council_models: savedCouncil?.council_models || settingsForm.council_models,
+        chairman_model: savedCouncil?.chairman_model || settingsForm.chairman_model,
       });
+      setEditingCouncilKey(savedCouncil?.key || editingCouncilKey);
+      setEditingCouncilName(savedCouncil?.name || councilName);
+      setIsNewCouncil(false);
+      setSelectedCouncilKey(savedCouncil?.key || selectedCouncilKey);
       setRemoveApiKey(false);
       setApiKeyInput('');
       setIsSettingsOpen(false);
@@ -470,6 +647,9 @@ function App() {
         isUpdating={isUpdating}
         updateLog={updateLog}
         onOpenSettings={handleOpenSettings}
+        councils={councils}
+        selectedCouncilKey={selectedCouncilKey}
+        onSelectCouncil={setSelectedCouncilKey}
         isOpen={isSidebarOpen}
         isMobile={isMobile}
         onClose={() => setIsSidebarOpen(false)}
@@ -482,6 +662,9 @@ function App() {
         isMobile={isMobile}
         errorMessage={sendError}
         clearError={() => setSendError('')}
+        councils={councils}
+        activeCouncilKey={currentConversation?.council_key || selectedCouncilKey}
+        onChangeCouncil={handleChangeConversationCouncil}
       />
       {isSettingsOpen && (
         <div className="settings-modal-backdrop" onClick={() => setIsSettingsOpen(false)}>
@@ -522,9 +705,46 @@ function App() {
                 </div>
 
                 <div className="settings-section">
+                  <div className="settings-label">Councils</div>
+                  <div className="settings-help">
+                    Group up to 4 models per council and switch them per conversation.
+                  </div>
+                  <div className="council-switcher">
+                    <select
+                      value={editingCouncilKey}
+                      onChange={(e) => handleSelectEditingCouncil(e.target.value)}
+                    >
+                      {councils.map((council) => (
+                        <option key={council.key} value={council.key}>
+                          {council.name}
+                        </option>
+                      ))}
+                      {isNewCouncil && (
+                        <option value={editingCouncilKey}>{editingCouncilName || 'New Council'}</option>
+                      )}
+                    </select>
+                    <button type="button" className="model-add-btn" onClick={handleStartNewCouncil}>
+                      New Council
+                    </button>
+                    {!isNewCouncil && editingCouncilKey !== 'default' && (
+                      <button type="button" className="delete-council-btn" onClick={handleDeleteCouncil}>
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Council name"
+                    value={editingCouncilName}
+                    onChange={(e) => setEditingCouncilName(e.target.value)}
+                  />
+                  {councilError && (
+                    <div className="settings-field-error">{councilError}</div>
+                  )}
+
                   <div className="settings-label">Council Members (max 4)</div>
                   <div className="settings-help">
-                    Select which models should participate in the council.
+                    Select which models should participate in this council.
                   </div>
                   <div className="model-add-row">
                     <input
@@ -567,9 +787,7 @@ function App() {
                       );
                     })}
                   </div>
-                </div>
 
-                <div className="settings-section">
                   <div className="settings-label">Chairman</div>
                   <div className="settings-help">
                     Choose which selected model synthesizes the final response.
@@ -589,6 +807,9 @@ function App() {
                 </div>
 
                 {settingsError && <div className="settings-error">{settingsError}</div>}
+                {councilError && !settingsError && (
+                  <div className="settings-error">{councilError}</div>
+                )}
 
                 <div className="settings-actions">
                   <button className="rename-cancel" onClick={() => setIsSettingsOpen(false)}>

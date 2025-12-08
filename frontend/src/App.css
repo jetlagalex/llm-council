@@ -216,6 +216,24 @@ body,
   flex: 1;
 }
 
+.council-switcher {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.council-switcher select {
+  flex: 1;
+  min-width: 180px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #d6d6d6;
+  background: #fff;
+  font-size: 14px;
+}
+
 .model-add-btn {
   padding: 10px 12px;
   border-radius: 8px;
@@ -230,6 +248,22 @@ body,
 .model-add-btn:hover {
   background: #357abd;
   border-color: #357abd;
+}
+
+.delete-council-btn {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e08585;
+  background: #fff5f5;
+  color: #b12323;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.delete-council-btn:hover {
+  background: #ffe0e0;
+  border-color: #c74c4c;
 }
 
 .model-grid {

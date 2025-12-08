@@ -21,6 +21,29 @@
   color: #333;
 }
 
+.sidebar-council-picker {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-council-picker select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  font-size: 13px;
+  color: #333;
+}
+
+.sidebar-council-picker select:focus {
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.15);
+  outline: none;
+}
+
 .sidebar-actions {
   display: flex;
   gap: 8px;

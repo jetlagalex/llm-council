@@ -10,6 +10,7 @@ import json
 import asyncio
 import asyncio.subprocess
 import os
+import re
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
@@ -39,7 +40,7 @@ app.add_middleware(
 
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
-    pass
+    council_key: Optional[str] = Field(default=None, description="Optional council profile key for the new conversation.")
 
 
 class UpdateConversationTitleRequest(BaseModel):
@@ -58,6 +59,7 @@ class ConversationMetadata(BaseModel):
     created_at: str
     title: str
     message_count: int
+    council_key: Optional[str] = None
 
 
 class Conversation(BaseModel):
@@ -65,6 +67,7 @@ class Conversation(BaseModel):
     id: str
     created_at: str
     title: str
+    council_key: Optional[str] = None
     messages: List[Dict[str, Any]]
 
 
@@ -96,6 +99,34 @@ class UpdateSettingsRequest(BaseModel):
         default=None,
         description="Optional list of available council choices, merged with defaults.",
     )
+
+
+class CouncilProfile(BaseModel):
+    """A named council configuration."""
+    key: str
+    name: str
+    council_models: List[str]
+    chairman_model: str
+
+
+class CreateCouncilRequest(BaseModel):
+    """Payload to create a council profile."""
+    name: str
+    council_models: List[str]
+    chairman_model: str
+    key: Optional[str] = None
+
+
+class UpdateCouncilRequest(BaseModel):
+    """Payload to update an existing council profile."""
+    name: Optional[str] = None
+    council_models: Optional[List[str]] = None
+    chairman_model: Optional[str] = None
+
+
+class UpdateConversationCouncilRequest(BaseModel):
+    """Assign a council profile to a conversation."""
+    council_key: str
 
 
 @app.get("/")
@@ -150,7 +181,7 @@ async def run_update_script():
     return {"status": "started", "unit": unit_name, "log_path": log_path}
 
 
-def _ensure_settings_ready() -> Dict[str, Any]:
+def _ensure_settings_ready(council: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Validate that settings contain an API key and at least one model.
     Raises HTTPException if requirements are not met.
@@ -160,8 +191,8 @@ def _ensure_settings_ready() -> Dict[str, Any]:
     if not api_key:
         raise HTTPException(status_code=400, detail="OpenRouter API key not set. Add it in Settings.")
 
-    council_models = settings.get("council_models") or COUNCIL_MODELS
-    chairman = settings.get("chairman_model") or CHAIRMAN_MODEL
+    council_models = (council or settings).get("council_models") or COUNCIL_MODELS
+    chairman = (council or settings).get("chairman_model") or CHAIRMAN_MODEL
     if not council_models:
         raise HTTPException(status_code=400, detail="Council models not configured. Update Settings.")
     if chairman not in council_models:
@@ -205,13 +236,41 @@ def _build_available_models(
     return _normalize_models(merged)
 
 
+def _generate_council_key(name: str) -> str:
+    """Create a slug-style council key from a human-readable name."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug or f"council-{uuid.uuid4().hex[:6]}"
+
+
+def _load_council_or_default(key: Optional[str]) -> Dict[str, Any]:
+    """
+    Fetch a council profile by key, falling back to the default if missing.
+    Raises HTTPException if nothing can be found.
+    """
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    target_key = key or "default"
+    council = storage.get_council(target_key) if target_key else None
+    if not council and target_key != "default":
+        council = storage.get_council("default")
+    if not council:
+        raise HTTPException(status_code=400, detail="No council profiles are configured.")
+    return council
+
+
 @app.get("/api/settings", response_model=SettingsResponse)
 async def get_settings():
     """Expose current settings for the UI."""
     settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    councils = storage.list_councils()
     key = settings.get("openrouter_api_key") or ""
     last4 = key[-4:] if key else None
-    available_models = _build_available_models(settings)
+    council_models = []
+    for council in councils:
+        council_models.extend(council.get("council_models", []))
+        council_models.append(council.get("chairman_model"))
+    available_models = _build_available_models(settings, council_models)
 
     return SettingsResponse(
         has_openrouter_key=bool(key),
@@ -262,6 +321,10 @@ async def update_settings(request: UpdateSettingsRequest):
         "available_models": available_models,
     }
     storage.update_settings(new_settings)
+    # Keep default council profile in sync with the saved defaults.
+    default_profile = storage.get_council("default")
+    default_name = default_profile["name"] if default_profile else "General"
+    storage.upsert_council("default", default_name, normalized_council, chairman_model)
 
     last4 = new_key[-4:] if new_key else None
     return SettingsResponse(
@@ -271,6 +334,101 @@ async def update_settings(request: UpdateSettingsRequest):
         chairman_model=chairman_model,
         available_models=available_models,
     )
+
+
+@app.get("/api/councils", response_model=List[CouncilProfile])
+async def list_council_profiles():
+    """List all council profiles."""
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    return storage.list_councils()
+
+
+@app.post("/api/councils", response_model=CouncilProfile)
+async def create_council_profile(request: CreateCouncilRequest):
+    """Create a new council profile."""
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Council name is required.")
+
+    normalized_council = _normalize_models(request.council_models)
+    chairman_model = request.chairman_model.strip()
+
+    if not normalized_council:
+        raise HTTPException(status_code=400, detail="At least one council model is required")
+    if len(normalized_council) > 4:
+        raise HTTPException(status_code=400, detail="Council limited to 4 members")
+    if not chairman_model:
+        raise HTTPException(status_code=400, detail="Chairman model is required")
+    if chairman_model not in normalized_council:
+        raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
+
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+
+    key = request.key.strip() if request.key else _generate_council_key(name)
+    if storage.get_council(key):
+        raise HTTPException(status_code=400, detail="Council key already exists.")
+
+    storage.upsert_council(key, name, normalized_council, chairman_model)
+
+    # Keep available list in sync so UI shows all used models.
+    updated_available = _build_available_models(settings, [*normalized_council, chairman_model])
+    storage.update_settings({**settings, "available_models": updated_available})
+
+    created = storage.get_council(key)
+    if not created:
+        raise HTTPException(status_code=500, detail="Failed to create council profile.")
+    return created
+
+
+@app.put("/api/councils/{council_key}", response_model=CouncilProfile)
+async def update_council_profile(council_key: str, request: UpdateCouncilRequest):
+    """Update an existing council profile."""
+    existing = storage.get_council(council_key)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Council not found.")
+
+    name = request.name.strip() if request.name is not None else existing["name"]
+    normalized_council = (
+        _normalize_models(request.council_models) if request.council_models is not None else existing["council_models"]
+    )
+    chairman_model = request.chairman_model.strip() if request.chairman_model is not None else existing["chairman_model"]
+
+    if not normalized_council:
+        raise HTTPException(status_code=400, detail="At least one council model is required")
+    if len(normalized_council) > 4:
+        raise HTTPException(status_code=400, detail="Council limited to 4 members")
+    if not chairman_model:
+        raise HTTPException(status_code=400, detail="Chairman model is required")
+    if chairman_model not in normalized_council:
+        raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
+
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+
+    storage.upsert_council(council_key, name, normalized_council, chairman_model)
+
+    updated_available = _build_available_models(settings, [*normalized_council, chairman_model])
+    storage.update_settings({**settings, "available_models": updated_available})
+
+    updated = storage.get_council(council_key)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update council profile.")
+    return updated
+
+
+@app.delete("/api/councils/{council_key}")
+async def delete_council_profile(council_key: str):
+    """Delete a council profile when it is not in use."""
+    if council_key == "default":
+        raise HTTPException(status_code=400, detail="Default council cannot be deleted.")
+    if storage.conversation_uses_council(council_key):
+        raise HTTPException(status_code=400, detail="Cannot delete a council that is assigned to conversations.")
+    deleted = storage.delete_council(council_key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Council not found.")
+    return {"status": "deleted", "key": council_key}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -283,7 +441,16 @@ async def list_conversations():
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    desired_council = request.council_key or "default"
+    council = storage.get_council(desired_council)
+    if not council:
+        if request.council_key:
+            raise HTTPException(status_code=400, detail="Unknown council selection.")
+        desired_council = "default"
+    conversation = storage.create_conversation(conversation_id, desired_council)
+    conversation["council_key"] = desired_council
     return conversation
 
 
@@ -293,6 +460,17 @@ async def get_conversation(conversation_id: str):
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    council_key = conversation.get("council_key") or "default"
+    if not storage.get_council(council_key):
+        council_key = "default"
+        storage.set_conversation_council(conversation_id, council_key)
+        conversation["council_key"] = council_key
+    else:
+        if not conversation.get("council_key"):
+            storage.set_conversation_council(conversation_id, council_key)
+        conversation["council_key"] = council_key
     return conversation
 
 
@@ -314,6 +492,30 @@ async def rename_conversation(conversation_id: str, request: UpdateConversationT
         "created_at": conversation["created_at"],
         "title": new_title,
         "message_count": len(conversation["messages"]),
+        "council_key": conversation.get("council_key"),
+    }
+
+
+@app.patch("/api/conversations/{conversation_id}/council", response_model=ConversationMetadata)
+async def update_conversation_council(conversation_id: str, request: UpdateConversationCouncilRequest):
+    """Assign a council profile to a conversation."""
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    council = storage.get_council(request.council_key) if request.council_key else None
+    if not council:
+        raise HTTPException(status_code=400, detail="Unknown council selection.")
+
+    storage.set_conversation_council(conversation_id, council["key"])
+
+    return {
+        "id": conversation_id,
+        "created_at": conversation["created_at"],
+        "title": conversation["title"],
+        "message_count": len(conversation["messages"]),
+        "council_key": council["key"],
     }
 
 
@@ -337,11 +539,21 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
-    _ensure_settings_ready()
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    council_key = conversation.get("council_key") or "default"
+    council = storage.get_council(council_key) or storage.get_council("default")
+    if not council:
+        raise HTTPException(status_code=400, detail="No council profiles are configured.")
+    _ensure_settings_ready(council)
+    if not conversation.get("council_key"):
+        storage.set_conversation_council(conversation_id, council["key"])
+        conversation["council_key"] = council["key"]
 
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
@@ -360,7 +572,9 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
         request.content,
-        history
+        history,
+        council["council_models"],
+        council["chairman_model"],
     )
 
     # Add assistant message with all stages
@@ -387,11 +601,21 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
-    _ensure_settings_ready()
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    settings = storage.get_settings()
+    storage.ensure_default_council(settings)
+    council_key = conversation.get("council_key") or "default"
+    council = storage.get_council(council_key) or storage.get_council("default")
+    if not council:
+        raise HTTPException(status_code=400, detail="No council profiles are configured.")
+    _ensure_settings_ready(council)
+    if not conversation.get("council_key"):
+        storage.set_conversation_council(conversation_id, council["key"])
+        conversation["council_key"] = council["key"]
 
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
@@ -410,18 +634,32 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content, history)
+            stage1_results = await stage1_collect_responses(
+                request.content,
+                history,
+                council["council_models"],
+            )
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(
+                request.content,
+                stage1_results,
+                council["council_models"],
+            )
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, history)
+            stage3_result = await stage3_synthesize_final(
+                request.content,
+                stage1_results,
+                stage2_results,
+                history,
+                council["chairman_model"],
+            )
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started

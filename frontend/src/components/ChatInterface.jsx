@@ -96,6 +96,9 @@ export default function ChatInterface({
   isMobile,
   errorMessage,
   clearError,
+  councils = [],
+  activeCouncilKey,
+  onChangeCouncil,
 }) {
   const [input, setInput] = useState('');
 
@@ -142,6 +145,23 @@ export default function ChatInterface({
         <div className="chat-title">
           {conversation.title || 'New Conversation'}
         </div>
+        {councils.length > 0 && (
+          <div className="chat-council-picker">
+            <label htmlFor="chat-council-select">Council</label>
+            <select
+              id="chat-council-select"
+              value={activeCouncilKey || councils[0]?.key || ''}
+              onChange={(e) => onChangeCouncil?.(e.target.value)}
+              disabled={!conversation}
+            >
+              {councils.map((council) => (
+                <option key={council.key} value={council.key}>
+                  {council.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <MessagesView messages={conversation.messages} isLoading={isLoading} />

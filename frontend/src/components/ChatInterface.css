@@ -25,6 +25,34 @@
   text-overflow: ellipsis;
 }
 
+.chat-council-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.chat-council-picker label {
+  font-size: 12px;
+  color: #555;
+  font-weight: 600;
+}
+
+.chat-council-picker select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  font-size: 13px;
+  color: #333;
+}
+
+.chat-council-picker select:focus {
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.15);
+  outline: none;
+}
+
 .sidebar-toggle {
   padding: 10px;
   width: 44px;
@@ -228,6 +256,9 @@
 @media (max-width: 768px) {
   .chat-header {
     padding: 12px 12px 0 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 
   .sidebar-toggle {
@@ -241,6 +272,10 @@
 
   .user-message .message-content {
     max-width: 100%;
+  }
+
+  .chat-council-picker {
+    width: 100%;
   }
 
   .input-form {

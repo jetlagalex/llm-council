@@ -49,13 +49,32 @@ def _ensure_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS council_profiles (
+                key TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                council_models TEXT NOT NULL,
+                chairman_model TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversation_council (
+                conversation_id TEXT PRIMARY KEY,
+                council_key TEXT NOT NULL,
+                FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+            )
+            """
+        )
 
 
 # Initialize database on module import
 _ensure_db()
 
 
-def create_conversation(conversation_id: str) -> Dict[str, Any]:
+def create_conversation(conversation_id: str, council_key: Optional[str] = None) -> Dict[str, Any]:
     """Create and persist a new conversation."""
     created_at = datetime.utcnow().isoformat()
     with _connect() as conn:
@@ -63,6 +82,14 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
             "INSERT INTO conversations (id, created_at, title) VALUES (?, ?, ?)",
             (conversation_id, created_at, "New Conversation"),
         )
+        if council_key:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO conversation_council (conversation_id, council_key)
+                VALUES (?, ?)
+                """,
+                (conversation_id, council_key),
+            )
 
     return {
         "id": conversation_id,
@@ -87,6 +114,106 @@ def _row_to_message(row) -> Dict[str, Any]:
     return message
 
 
+def set_conversation_council(conversation_id: str, council_key: str):
+    """Link a conversation to a chosen council profile."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO conversation_council (conversation_id, council_key)
+            VALUES (?, ?)
+            """,
+            (conversation_id, council_key),
+        )
+
+
+def get_conversation_council(conversation_id: str) -> Optional[str]:
+    """Fetch the council key associated with a conversation."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "SELECT council_key FROM conversation_council WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def list_councils() -> List[Dict[str, Any]]:
+    """Return all saved council profiles."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            SELECT key, name, council_models, chairman_model
+            FROM council_profiles
+            ORDER BY name COLLATE NOCASE ASC
+            """
+        )
+        rows = cur.fetchall()
+    return [
+        {
+            "key": row[0],
+            "name": row[1],
+            "council_models": json.loads(row[2]),
+            "chairman_model": row[3],
+        }
+        for row in rows
+    ]
+
+
+def get_council(key: str) -> Optional[Dict[str, Any]]:
+    """Return a single council profile by key."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            SELECT key, name, council_models, chairman_model
+            FROM council_profiles
+            WHERE key = ?
+            """,
+            (key,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "key": row[0],
+        "name": row[1],
+        "council_models": json.loads(row[2]),
+        "chairman_model": row[3],
+    }
+
+
+def upsert_council(key: str, name: str, council_models: List[str], chairman_model: str):
+    """Create or update a council profile."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO council_profiles (key, name, council_models, chairman_model)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                name=excluded.name,
+                council_models=excluded.council_models,
+                chairman_model=excluded.chairman_model
+            """,
+            (key, name, json.dumps(council_models), chairman_model),
+        )
+
+
+def delete_council(key: str) -> bool:
+    """Remove a council profile."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM council_profiles WHERE key = ?", (key,))
+        return cur.rowcount > 0
+
+
+def conversation_uses_council(key: str) -> bool:
+    """Check if any conversation is linked to the given council key."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "SELECT 1 FROM conversation_council WHERE council_key = ? LIMIT 1",
+            (key,),
+        )
+        return cur.fetchone() is not None
+
+
 def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """Load a conversation with all messages."""
     with _connect() as conn:
@@ -97,6 +224,11 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         conv = cur.fetchone()
         if not conv:
             return None
+        council_cur = conn.execute(
+            "SELECT council_key FROM conversation_council WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        council_row = council_cur.fetchone()
 
         messages_cur = conn.execute(
             """
@@ -113,6 +245,7 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         "id": conv[0],
         "created_at": conv[1],
         "title": conv[2],
+        "council_key": council_row[0] if council_row else None,
         "messages": messages,
     }
 
@@ -158,6 +291,34 @@ def get_settings() -> Dict[str, Any]:
     return merged
 
 
+def ensure_default_council(settings: Dict[str, Any]):
+    """
+    Make sure a baseline council profile exists using the provided settings.
+    This is idempotent and will not overwrite existing profiles.
+    """
+    existing = get_council("default")
+    if existing:
+        return existing
+
+    models = settings.get("council_models")
+    chair = settings.get("chairman_model")
+    # Fallback if settings are empty for any reason.
+    if not models:
+        from .config import COUNCIL_MODELS as DEFAULT_MODELS  # Lazy import to avoid cycles
+        models = DEFAULT_MODELS
+    if not chair:
+        from .config import CHAIRMAN_MODEL as DEFAULT_CHAIR
+        chair = DEFAULT_CHAIR
+
+    upsert_council(
+        "default",
+        "General",
+        models,
+        chair,
+    )
+    return get_council("default")
+
+
 def update_settings(settings: Dict[str, Any]):
     """Persist settings (overwrites the single settings row)."""
     with _connect() as conn:
@@ -172,9 +333,10 @@ def list_conversations() -> List[Dict[str, Any]]:
     with _connect() as conn:
         cur = conn.execute(
             """
-            SELECT c.id, c.created_at, c.title, COUNT(m.id) as message_count
+            SELECT c.id, c.created_at, c.title, COUNT(m.id) as message_count, cc.council_key
             FROM conversations c
             LEFT JOIN messages m ON c.id = m.conversation_id
+            LEFT JOIN conversation_council cc ON cc.conversation_id = c.id
             GROUP BY c.id
             ORDER BY c.created_at DESC
             """
@@ -187,6 +349,7 @@ def list_conversations() -> List[Dict[str, Any]]:
             "created_at": row[1],
             "title": row[2],
             "message_count": row[3],
+            "council_key": row[4] or "default",
         }
         for row in rows
     ]
@@ -245,6 +408,9 @@ def delete_conversation(conversation_id: str) -> bool:
     with _connect() as conn:
         conn.execute(
             "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
+        )
+        conn.execute(
+            "DELETE FROM conversation_council WHERE conversation_id = ?", (conversation_id,)
         )
         cur = conn.execute(
             "DELETE FROM conversations WHERE id = ?", (conversation_id,)

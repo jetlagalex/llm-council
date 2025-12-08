@@ -2,8 +2,6 @@
 
 from typing import List, Dict, Any, Tuple
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
-from .storage import get_settings
 
 
 def _build_context_messages(history: List[Dict[str, Any]], user_query: str, max_messages: int = 8) -> List[Dict[str, str]]:
@@ -27,7 +25,8 @@ def _build_context_messages(history: List[Dict[str, Any]], user_query: str, max_
 
 async def stage1_collect_responses(
     user_query: str,
-    history: List[Dict[str, Any]]
+    history: List[Dict[str, Any]],
+    council_models: List[str],
 ) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
@@ -39,10 +38,6 @@ async def stage1_collect_responses(
         List of dicts with 'model' and 'response' keys
     """
     messages = _build_context_messages(history, user_query)
-
-    # Query all models in parallel
-    settings = get_settings()
-    council_models = settings.get("council_models", COUNCIL_MODELS)
 
     responses = await query_models_parallel(council_models, messages)
 
@@ -60,7 +55,8 @@ async def stage1_collect_responses(
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    council_models: List[str],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -120,10 +116,6 @@ Now provide your evaluation and ranking:"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
-    # Get rankings from all council models in parallel
-    settings = get_settings()
-    council_models = settings.get("council_models", COUNCIL_MODELS)
-
     responses = await query_models_parallel(council_models, messages)
 
     # Format results
@@ -146,6 +138,7 @@ async def stage3_synthesize_final(
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]],
     history: List[Dict[str, Any]],
+    chairman_model: str,
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -196,10 +189,6 @@ Your task as Chairman is to synthesize all of this information into a single, co
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
 
     messages = [{"role": "user", "content": chairman_prompt}]
-
-    # Query the chairman model
-    settings = get_settings()
-    chairman_model = settings.get("chairman_model", CHAIRMAN_MODEL)
 
     response = await query_model(chairman_model, messages)
 
@@ -335,7 +324,12 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str, history: List[Dict[str, Any]]) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    history: List[Dict[str, Any]],
+    council_models: List[str],
+    chairman_model: str,
+) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
@@ -346,7 +340,7 @@ async def run_full_council(user_query: str, history: List[Dict[str, Any]]) -> Tu
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query, history)
+    stage1_results = await stage1_collect_responses(user_query, history, council_models)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -356,7 +350,11 @@ async def run_full_council(user_query: str, history: List[Dict[str, Any]]) -> Tu
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(
+        user_query,
+        stage1_results,
+        council_models,
+    )
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
@@ -366,7 +364,8 @@ async def run_full_council(user_query: str, history: List[Dict[str, Any]]) -> Tu
         user_query,
         stage1_results,
         stage2_results,
-        history
+        history,
+        chairman_model,
     )
 
     # Prepare metadata

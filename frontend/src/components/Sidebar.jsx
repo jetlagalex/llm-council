@@ -14,6 +14,9 @@ export default function Sidebar({
   isUpdating,
   updateLog,
   onOpenSettings,
+  councils = [],
+  selectedCouncilKey,
+  onSelectCouncil,
   isOpen,
   isMobile,
   onClose,
@@ -128,6 +131,21 @@ export default function Sidebar({
                 {line}
               </div>
             ))}
+          </div>
+        )}
+        {councils.length > 0 && (
+          <div className="sidebar-council-picker">
+            <div className="settings-label">Council for new chats</div>
+            <select
+              value={selectedCouncilKey || councils[0]?.key || ''}
+              onChange={(e) => onSelectCouncil?.(e.target.value)}
+            >
+              {councils.map((council) => (
+                <option key={council.key} value={council.key}>
+                  {council.name}
+                </option>
+              ))}
+            </select>
           </div>
         )}
       </div>
