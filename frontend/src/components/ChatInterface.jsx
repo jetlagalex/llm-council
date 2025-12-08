@@ -145,23 +145,6 @@ export default function ChatInterface({
         <div className="chat-title">
           {conversation.title || 'New Conversation'}
         </div>
-        {councils.length > 0 && (
-          <div className="chat-council-picker">
-            <label htmlFor="chat-council-select">Council</label>
-            <select
-              id="chat-council-select"
-              value={activeCouncilKey || councils[0]?.key || ''}
-              onChange={(e) => onChangeCouncil?.(e.target.value)}
-              disabled={!conversation}
-            >
-              {councils.map((council) => (
-                <option key={council.key} value={council.key}>
-                  {council.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
 
       <MessagesView messages={conversation.messages} isLoading={isLoading} />
@@ -181,13 +164,32 @@ export default function ChatInterface({
           disabled={isLoading}
           rows={3}
         />
-        <button
-          type="submit"
-          className="send-button"
-          disabled={!input.trim() || isLoading}
-        >
-          Send
-        </button>
+        <div className="composer-actions">
+          {councils.length > 0 && (
+            <div className="composer-council-picker">
+              <label htmlFor="composer-council-select">Council</label>
+              <select
+                id="composer-council-select"
+                value={activeCouncilKey || councils[0]?.key || ''}
+                onChange={(e) => onChangeCouncil?.(e.target.value)}
+                disabled={!conversation}
+              >
+                {councils.map((council) => (
+                  <option key={council.key} value={council.key}>
+                    {council.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button
+            type="submit"
+            className="send-button"
+            disabled={!input.trim() || isLoading}
+          >
+            Send
+          </button>
+        </div>
       </form>
     </div>
   );
