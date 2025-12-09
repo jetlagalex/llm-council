@@ -43,7 +43,8 @@ async def get_async_client() -> httpx.AsyncClient:
     async with _client_lock:
         if _async_client and not _async_client.is_closed:
             return _async_client
-        _async_client = httpx.AsyncClient(http2=True)
+        # Use HTTP/1.1 to avoid requiring optional h2 dependency in deployments.
+        _async_client = httpx.AsyncClient()
         return _async_client
 
 
