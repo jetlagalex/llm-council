@@ -54,11 +54,12 @@ def _select_fallback_response(
                 continue
             for result in stage1_results:
                 if result.get("model") == model_name:
-                    return result.get("response"), model_name
+                    content = result.get("response")
+                    return (content if content is not None else ""), model_name
 
     if stage1_results:
         top = stage1_results[0]
-        return top.get("response"), top.get("model")
+        return (top.get("response") if top.get("response") is not None else ""), top.get("model")
 
     return None, None
 
@@ -269,10 +270,11 @@ Provide a clear, well-reasoned final answer that represents the council's collec
             extra={"chairman_model": chairman_model, "elapsed_ms": elapsed_ms},
         )
         fallback_text, fallback_model = _select_fallback_response(stage1_results, aggregate_rankings)
-        if fallback_text:
+        if fallback_text is not None:
+            safe_fallback = fallback_text if fallback_text != "" else "Chairman failed and no content was available from the top-ranked model."
             return {
                 "model": chairman_model,
-                "response": f"(Chairman fallback using {fallback_model})\n\n{fallback_text}",
+                "response": f"(Chairman fallback using {fallback_model})\n\n{safe_fallback}",
                 "fallback_model": fallback_model,
             }
         return {
