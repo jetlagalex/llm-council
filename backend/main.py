@@ -681,6 +681,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 stage2_results,
                 history,
                 council["chairman_model"],
+                aggregate_rankings,
             )
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 

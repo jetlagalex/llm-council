@@ -36,6 +36,33 @@ def _build_context_messages(history: Sequence[Dict[str, Any]], user_query: str) 
     return condensed
 
 
+def _select_fallback_response(
+    stage1_results: List[Dict[str, Any]],
+    aggregate_rankings: Sequence[Dict[str, Any]] | None,
+) -> Tuple[str | None, str | None]:
+    """
+    Choose a fallback Stage 3 response using the best ranked Stage 1 answer.
+
+    Preference order:
+    1. Top aggregate-ranked model's Stage 1 response
+    2. First Stage 1 response (if aggregates are unavailable)
+    """
+    if aggregate_rankings:
+        for ranked in aggregate_rankings:
+            model_name = ranked.get("model")
+            if not model_name:
+                continue
+            for result in stage1_results:
+                if result.get("model") == model_name:
+                    return result.get("response"), model_name
+
+    if stage1_results:
+        top = stage1_results[0]
+        return top.get("response"), top.get("model")
+
+    return None, None
+
+
 async def stage1_collect_responses(
     user_query: str,
     history: Sequence[Dict[str, Any]],
@@ -177,6 +204,7 @@ async def stage3_synthesize_final(
     stage2_results: List[Dict[str, Any]],
     history: Sequence[Dict[str, Any]],
     chairman_model: str,
+    aggregate_rankings: Sequence[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -185,6 +213,7 @@ async def stage3_synthesize_final(
         user_query: The original user query
         stage1_results: Individual model responses from Stage 1
         stage2_results: Rankings from Stage 2
+        aggregate_rankings: Aggregate rankings across models (used for fallback)
 
     Returns:
         Dict with 'model' and 'response' keys
@@ -239,6 +268,13 @@ Provide a clear, well-reasoned final answer that represents the council's collec
             "stage3_synthesize_final_failed",
             extra={"chairman_model": chairman_model, "elapsed_ms": elapsed_ms},
         )
+        fallback_text, fallback_model = _select_fallback_response(stage1_results, aggregate_rankings)
+        if fallback_text:
+            return {
+                "model": chairman_model,
+                "response": f"(Chairman fallback using {fallback_model})\n\n{fallback_text}",
+                "fallback_model": fallback_model,
+            }
         return {
             "model": chairman_model,
             "response": "Error: Unable to generate final synthesis."
@@ -424,6 +460,7 @@ async def run_full_council(
         stage2_results,
         history,
         chairman_model,
+        aggregate_rankings,
     )
 
     # Prepare metadata
