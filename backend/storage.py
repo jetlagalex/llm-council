@@ -2,11 +2,11 @@
 
 import json
 import sqlite3
+from collections import deque
 from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
-from .config import DB_PATH, DATA_DIR
+from .config import DATA_DIR, DB_PATH, MAX_HISTORY_BUFFER
 
 
 def _connect():
@@ -239,14 +239,17 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
             """,
             (conversation_id,),
         )
-        messages = [_row_to_message(row) for row in messages_cur.fetchall()]
+        messages = deque(
+            (_row_to_message(row) for row in messages_cur.fetchall()),
+            maxlen=MAX_HISTORY_BUFFER,
+        )
 
     return {
         "id": conv[0],
         "created_at": conv[1],
         "title": conv[2],
         "council_key": council_row[0] if council_row else None,
-        "messages": messages,
+        "messages": list(messages),
     }
 
 

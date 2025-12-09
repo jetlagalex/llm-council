@@ -1,10 +1,22 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
+import logging
+from collections.abc import Sequence
+from time import perf_counter
+from typing import Any, Dict, List, Tuple
+
+from .config import (
+    MAX_CONTEXT_MESSAGES,
+    MAX_SUMMARY_MESSAGES,
+    TITLE_MODEL,
+    TITLE_TIMEOUT,
+)
+from .openrouter import query_model, query_models_parallel
+
+logger = logging.getLogger(__name__)
 
 
-def _build_context_messages(history: List[Dict[str, Any]], user_query: str, max_messages: int = 8) -> List[Dict[str, str]]:
+def _build_context_messages(history: Sequence[Dict[str, Any]], user_query: str) -> List[Dict[str, str]]:
     """
     Build chat messages including prior turns so models have conversation memory.
 
@@ -12,8 +24,9 @@ def _build_context_messages(history: List[Dict[str, Any]], user_query: str, max_
     context compact and avoid leaking intermediate deliberation.
     """
     condensed: List[Dict[str, str]] = []
+    recent_history = list(history)[-MAX_CONTEXT_MESSAGES:]
 
-    for msg in history[-max_messages:]:
+    for msg in recent_history:
         if msg["role"] == "user":
             condensed.append({"role": "user", "content": msg["content"]})
         elif msg["role"] == "assistant" and msg.get("stage3"):
@@ -25,7 +38,7 @@ def _build_context_messages(history: List[Dict[str, Any]], user_query: str, max_
 
 async def stage1_collect_responses(
     user_query: str,
-    history: List[Dict[str, Any]],
+    history: Sequence[Dict[str, Any]],
     council_models: List[str],
 ) -> List[Dict[str, Any]]:
     """
@@ -37,6 +50,11 @@ async def stage1_collect_responses(
     Returns:
         List of dicts with 'model' and 'response' keys
     """
+    start_time = perf_counter()
+    logger.info(
+        "stage1_collect_responses_start",
+        extra={"model_count": len(council_models)},
+    )
     messages = _build_context_messages(history, user_query)
 
     responses = await query_models_parallel(council_models, messages)
@@ -45,10 +63,17 @@ async def stage1_collect_responses(
     stage1_results = []
     for model, response in responses.items():
         if response is not None:  # Only include successful responses
-            stage1_results.append({
-                "model": model,
-                "response": response.get('content', '')
-            })
+            stage1_results.append(
+                {
+                    "model": model,
+                    "response": response.get("content", ""),
+                }
+            )
+    elapsed_ms = int((perf_counter() - start_time) * 1000)
+    logger.info(
+        "stage1_collect_responses_complete",
+        extra={"elapsed_ms": elapsed_ms, "success_count": len(stage1_results)},
+    )
 
     return stage1_results
 
@@ -68,6 +93,11 @@ async def stage2_collect_rankings(
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
+    start_time = perf_counter()
+    logger.info(
+        "stage2_collect_rankings_start",
+        extra={"model_count": len(council_models)},
+    )
     # Create anonymized labels for responses (Response A, Response B, etc.)
     labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
@@ -122,13 +152,21 @@ Now provide your evaluation and ranking:"""
     stage2_results = []
     for model, response in responses.items():
         if response is not None:
-            full_text = response.get('content', '')
+            full_text = response.get("content", "")
             parsed = parse_ranking_from_text(full_text)
-            stage2_results.append({
-                "model": model,
-                "ranking": full_text,
-                "parsed_ranking": parsed
-            })
+            stage2_results.append(
+                {
+                    "model": model,
+                    "ranking": full_text,
+                    "parsed_ranking": parsed,
+                }
+            )
+
+    elapsed_ms = int((perf_counter() - start_time) * 1000)
+    logger.info(
+        "stage2_collect_rankings_complete",
+        extra={"elapsed_ms": elapsed_ms, "success_count": len(stage2_results)},
+    )
 
     return stage2_results, label_to_model
 
@@ -137,7 +175,7 @@ async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]],
-    history: List[Dict[str, Any]],
+    history: Sequence[Dict[str, Any]],
     chairman_model: str,
 ) -> Dict[str, Any]:
     """
@@ -151,6 +189,8 @@ async def stage3_synthesize_final(
     Returns:
         Dict with 'model' and 'response' keys
     """
+    start_time = perf_counter()
+    logger.info("stage3_synthesize_final_start", extra={"chairman_model": chairman_model})
     # Build comprehensive context for chairman
     stage1_text = "\n\n".join([
         f"Model: {result['model']}\nResponse: {result['response']}"
@@ -164,7 +204,7 @@ async def stage3_synthesize_final(
 
     history_text = "\n\n".join([
         f"{msg['role'].capitalize()}: {msg['content'] if msg['role']=='user' else msg['stage3'].get('response', '')}"
-        for msg in history[-6:]
+        for msg in list(history)[-MAX_SUMMARY_MESSAGES:]
         if msg["role"] == "user" or msg.get("stage3")
     ])
 
@@ -194,15 +234,23 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     if response is None:
         # Fallback if chairman fails
+        elapsed_ms = int((perf_counter() - start_time) * 1000)
+        logger.warning(
+            "stage3_synthesize_final_failed",
+            extra={"chairman_model": chairman_model, "elapsed_ms": elapsed_ms},
+        )
         return {
             "model": chairman_model,
             "response": "Error: Unable to generate final synthesis."
         }
 
-    return {
-        "model": chairman_model,
-        "response": response.get('content', '')
-    }
+    elapsed_ms = int((perf_counter() - start_time) * 1000)
+    logger.info(
+        "stage3_synthesize_final_complete",
+        extra={"chairman_model": chairman_model, "elapsed_ms": elapsed_ms},
+    )
+
+    return {"model": chairman_model, "response": response.get("content", "")}
 
 
 def parse_ranking_from_text(ranking_text: str) -> List[str]:
@@ -305,8 +353,9 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    # Use configured fast title model for title generation
+    start_time = perf_counter()
+    response = await query_model(TITLE_MODEL, messages, timeout=TITLE_TIMEOUT)
 
     if response is None:
         # Fallback to a generic title
@@ -321,15 +370,23 @@ Title:"""
     if len(title) > 50:
         title = title[:47] + "..."
 
+    elapsed_ms = int((perf_counter() - start_time) * 1000)
+    logger.info("title_generated", extra={"elapsed_ms": elapsed_ms})
+
     return title
 
 
 async def run_full_council(
     user_query: str,
-    history: List[Dict[str, Any]],
+    history: Sequence[Dict[str, Any]],
     council_models: List[str],
     chairman_model: str,
-) -> Tuple[List, List, Dict, Dict]:
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    Dict[str, Any],
+    Dict[str, Any],
+]:
     """
     Run the complete 3-stage council process.
 
@@ -339,6 +396,7 @@ async def run_full_council(
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
+    overall_start = perf_counter()
     # Stage 1: Collect individual responses
     stage1_results = await stage1_collect_responses(user_query, history, council_models)
 
@@ -373,5 +431,15 @@ async def run_full_council(
         "label_to_model": label_to_model,
         "aggregate_rankings": aggregate_rankings
     }
+
+    elapsed_ms = int((perf_counter() - overall_start) * 1000)
+    logger.info(
+        "run_full_council_complete",
+        extra={
+            "elapsed_ms": elapsed_ms,
+            "stage1_count": len(stage1_results),
+            "stage2_count": len(stage2_results),
+        },
+    )
 
     return stage1_results, stage2_results, stage3_result, metadata

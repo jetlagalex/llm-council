@@ -1,20 +1,36 @@
 """FastAPI backend for LLM Council."""
 
+import asyncio
+import asyncio.subprocess
+import json
+import os
+import re
+import uuid
+from collections import deque
+from typing import Any, Dict, List, Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
-import uuid
-import json
-import asyncio
-import asyncio.subprocess
-import os
-import re
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
-from .config import AVAILABLE_MODELS, COUNCIL_MODELS, CHAIRMAN_MODEL, OPENROUTER_API_KEY
+from .council import (
+    calculate_aggregate_rankings,
+    generate_conversation_title,
+    run_full_council,
+    stage1_collect_responses,
+    stage2_collect_rankings,
+    stage3_synthesize_final,
+)
+from .config import (
+    AVAILABLE_MODELS,
+    CHAIRMAN_MODEL,
+    COUNCIL_MODELS,
+    MAX_HISTORY_BUFFER,
+    OPENROUTER_API_KEY,
+)
+from .openrouter import close_async_client
 
 app = FastAPI(title="LLM Council API")
 
@@ -127,6 +143,12 @@ class UpdateCouncilRequest(BaseModel):
 class UpdateConversationCouncilRequest(BaseModel):
     """Assign a council profile to a conversation."""
     council_key: str
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Ensure outbound HTTP clients are cleaned up."""
+    await close_async_client()
 
 
 @app.get("/")
@@ -559,7 +581,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     is_first_message = len(conversation["messages"]) == 0
 
     # Capture history before adding the new turn so we can include it in prompts
-    history = conversation["messages"]
+    history = deque(conversation["messages"], maxlen=MAX_HISTORY_BUFFER)
 
     # Add user message
     storage.add_user_message(conversation_id, request.content)
@@ -619,7 +641,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
-    history = conversation["messages"]
+    history = deque(conversation["messages"], maxlen=MAX_HISTORY_BUFFER)
 
     # Stream stage milestones as SSE events so the UI can update incrementally.
     async def event_generator():
