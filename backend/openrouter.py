@@ -18,7 +18,7 @@ from .config import (
     RETRY_BACKOFF_BASE,
     RETRY_JITTER,
 )
-from .storage import get_settings
+from .storage import get_settings_async
 from .utils import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,10 @@ async def get_async_client() -> httpx.AsyncClient:
     async with _client_lock:
         if _async_client and not _async_client.is_closed:
             return _async_client
-        # Use HTTP/1.1 to avoid requiring optional h2 dependency in deployments.
-        _async_client = httpx.AsyncClient()
+        # Configure robust limits
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=40)
+        timeout = httpx.Timeout(connect=10.0, read=40.0, write=10.0, pool=5.0)
+        _async_client = httpx.AsyncClient(limits=limits, timeout=timeout)
         return _async_client
 
 
@@ -72,7 +74,7 @@ async def query_model(
     Returns:
         Response dict with 'content' and optional 'reasoning_details', or None if failed
     """
-    settings = get_settings()
+    settings = await get_settings_async()
     api_key = settings.get("openrouter_api_key") or OPENROUTER_API_KEY
 
     headers = {

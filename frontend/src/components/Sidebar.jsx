@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import './Sidebar.css';
 
 // Lists available conversations and basic actions.
-export default function Sidebar({
+const Sidebar = memo(function Sidebar({
   conversations,
   currentConversationId,
   onSelectConversation,
@@ -157,9 +157,8 @@ export default function Sidebar({
           conversations.map((conv) => (
             <div
               key={conv.id}
-              className={`conversation-item ${
-                conv.id === currentConversationId ? 'active' : ''
-              }`}
+              className={`conversation-item ${conv.id === currentConversationId ? 'active' : ''
+                }`}
               onClick={() => onSelectConversation(conv.id)}
               onContextMenu={(event) => openContextMenu(event, conv)}
             >
@@ -199,4 +198,6 @@ export default function Sidebar({
       )}
     </div>
   );
-}
+});
+
+export default Sidebar;

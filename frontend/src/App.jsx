@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -124,7 +124,7 @@ function App() {
     }
   };
 
-  const handleNewConversation = async () => {
+  const handleNewConversation = useCallback(async () => {
     try {
       const preferredCouncil =
         councils.find((council) => council.key === selectedCouncilKey)?.key ||
@@ -142,18 +142,19 @@ function App() {
         },
         ...conversations,
       ]);
+
       setCurrentConversationId(newConv.id);
-      setCurrentConversation({ ...newConv, council_key: newCouncilKey, messages: [] });
-      setSelectedCouncilKey(newCouncilKey);
+      setCurrentConversation({ ...newConv, council_key: newCouncilKey || 'default', messages: [] });
+      setSelectedCouncilKey(newCouncilKey || 'default');
       if (isMobile) {
         setIsSidebarOpen(false);
       }
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
-  };
+  }, [councils, selectedCouncilKey, conversations, isMobile]);
 
-  const handleSelectConversation = (id) => {
+  const handleSelectConversation = useCallback((id) => {
     setCurrentConversationId(id);
     const match = conversations.find((conv) => conv.id === id);
     if (match?.council_key) {
@@ -162,15 +163,15 @@ function App() {
     if (isMobile) {
       setIsSidebarOpen(false);
     }
-  };
+  }, [conversations, isMobile]);
 
   // Open a custom rename modal instead of the browser prompt.
-  const handleRenameConversation = (conversation) => {
+  const handleRenameConversation = useCallback((conversation) => {
     if (!conversation) return;
     setRenameTarget(conversation);
     setRenameValue(conversation.title || 'New Conversation');
     setRenameError('');
-  };
+  }, []);
 
   // Persist the rename and keep list + active conversation in sync.
   const submitRename = async () => {
@@ -198,7 +199,7 @@ function App() {
     }
   };
 
-  const handleChangeConversationCouncil = async (councilKey) => {
+  const handleChangeConversationCouncil = useCallback(async (councilKey) => {
     if (!currentConversationId) return;
     try {
       const updated = await api.setConversationCouncil(currentConversationId, councilKey);
@@ -216,10 +217,10 @@ function App() {
       console.error('Failed to update conversation council:', error);
       setSendError(error.message || 'Failed to update council.');
     }
-  };
+  }, [currentConversationId]);
 
   // Delete a conversation and choose a sensible fallback selection.
-  const handleDeleteConversation = async (id) => {
+  const handleDeleteConversation = useCallback(async (id) => {
     const confirmed = window.confirm(
       'Delete this conversation and all messages?'
     );
@@ -247,10 +248,10 @@ function App() {
     } catch (error) {
       console.error('Failed to delete conversation:', error);
     }
-  };
+  }, [currentConversationId]);
 
   // Kick off the system update script without blocking the UI.
-  const handleTriggerUpdate = async () => {
+  const handleTriggerUpdate = useCallback(async () => {
     setUpdateStatus('Starting update...');
     setIsUpdating(true);
     setUpdateLog([]);
@@ -269,10 +270,10 @@ function App() {
     }
     // Mark as not updating after initiating to re-enable the button.
     setIsUpdating(false);
-  };
+  }, []);
 
   // Open settings modal and fetch current values.
-  const handleOpenSettings = async () => {
+  const handleOpenSettings = useCallback(async () => {
     setIsSettingsOpen(true);
     setSettingsLoading(true);
     setSettingsError('');
@@ -310,7 +311,7 @@ function App() {
     } finally {
       setSettingsLoading(false);
     }
-  };
+  }, [currentConversation, selectedCouncilKey]);
 
   // Allow adding custom OpenRouter model IDs to the available council roster.
   const handleAddModel = () => {
@@ -558,7 +559,7 @@ function App() {
   };
 
   // Kick off a council run and mirror the streaming SSE events into UI state.
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = useCallback(async (content) => {
     if (!currentConversationId) return;
 
     setIsLoading(true);
@@ -704,7 +705,7 @@ function App() {
       }
       setIsLoading(false);
     }
-  };
+  }, [currentConversationId, conversations]);
 
   return (
     <div className={`app ${isMobile ? 'is-mobile' : ''}`}>
@@ -729,16 +730,16 @@ function App() {
         onSelectCouncil={setSelectedCouncilKey}
         isOpen={isSidebarOpen}
         isMobile={isMobile}
-        onClose={() => setIsSidebarOpen(false)}
+        onClose={useCallback(() => setIsSidebarOpen(false), [])}
       />
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
-        onOpenSidebar={() => setIsSidebarOpen(true)}
+        onOpenSidebar={useCallback(() => setIsSidebarOpen(true), [])}
         isMobile={isMobile}
         errorMessage={sendError}
-        clearError={() => setSendError('')}
+        clearError={useCallback(() => setSendError(''), [])}
         councils={councils}
         activeCouncilKey={currentConversation?.council_key || selectedCouncilKey}
         onChangeCouncil={handleChangeConversationCouncil}

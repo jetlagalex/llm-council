@@ -203,12 +203,12 @@ async def run_update_script():
     return {"status": "started", "unit": unit_name, "log_path": log_path}
 
 
-def _ensure_settings_ready(council: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def _ensure_settings_ready(council: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Validate that settings contain an API key and at least one model.
     Raises HTTPException if requirements are not met.
     """
-    settings = storage.get_settings()
+    settings = await storage.get_settings_async()
     api_key = settings.get("openrouter_api_key") or OPENROUTER_API_KEY
     if not api_key:
         raise HTTPException(status_code=400, detail="OpenRouter API key not set. Add it in Settings.")
@@ -268,17 +268,17 @@ def _generate_council_key(name: str) -> str:
     return slug or f"council-{uuid.uuid4().hex[:6]}"
 
 
-def _load_council_or_default(key: Optional[str]) -> Dict[str, Any]:
+async def _load_council_or_default(key: Optional[str]) -> Dict[str, Any]:
     """
     Fetch a council profile by key, falling back to the default if missing.
     Raises HTTPException if nothing can be found.
     """
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
     target_key = key or "default"
-    council = storage.get_council(target_key) if target_key else None
+    council = await storage.get_council(target_key) if target_key else None
     if not council and target_key != "default":
-        council = storage.get_council("default")
+        council = await storage.get_council("default")
     if not council:
         raise HTTPException(status_code=400, detail="No council profiles are configured.")
     return council
@@ -287,9 +287,9 @@ def _load_council_or_default(key: Optional[str]) -> Dict[str, Any]:
 @app.get("/api/settings", response_model=SettingsResponse)
 async def get_settings():
     """Expose current settings for the UI."""
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
-    councils = storage.list_councils()
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
+    councils = await storage.list_councils()
     key = settings.get("openrouter_api_key") or ""
     last4 = key[-4:] if key else None
     council_models = []
@@ -322,7 +322,7 @@ async def update_settings(request: UpdateSettingsRequest):
     if chairman_model not in normalized_council:
         raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
 
-    current = storage.get_settings()
+    current = await storage.get_settings_async()
     # If the client passes an explicit list of available models, respect it.
     base_available = (
         request.available_models
@@ -348,9 +348,9 @@ async def update_settings(request: UpdateSettingsRequest):
     }
     storage.update_settings(new_settings)
     # Keep default council profile in sync with the saved defaults.
-    default_profile = storage.get_council("default")
+    default_profile = await storage.get_council("default")
     default_name = default_profile["name"] if default_profile else "General"
-    storage.upsert_council("default", default_name, normalized_council, chairman_model)
+    await storage.upsert_council("default", default_name, normalized_council, chairman_model)
 
     last4 = new_key[-4:] if new_key else None
     return SettingsResponse(
@@ -365,9 +365,9 @@ async def update_settings(request: UpdateSettingsRequest):
 @app.get("/api/councils", response_model=List[CouncilProfile])
 async def list_council_profiles():
     """List all council profiles."""
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
-    return storage.list_councils()
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
+    return await storage.list_councils()
 
 
 @app.post("/api/councils", response_model=CouncilProfile)
@@ -389,20 +389,20 @@ async def create_council_profile(request: CreateCouncilRequest):
     if chairman_model not in normalized_council:
         raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
 
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
 
     key = request.key.strip() if request.key else _generate_council_key(name)
-    if storage.get_council(key):
+    if await storage.get_council(key):
         raise HTTPException(status_code=400, detail="Council key already exists.")
 
-    storage.upsert_council(key, name, normalized_council, chairman_model)
+    await storage.upsert_council(key, name, normalized_council, chairman_model)
 
     # Keep available list in sync so UI shows all used models.
     updated_available = _build_available_models(settings, [*normalized_council, chairman_model])
-    storage.update_settings({**settings, "available_models": updated_available})
+    await storage.update_settings({**settings, "available_models": updated_available})
 
-    created = storage.get_council(key)
+    created = await storage.get_council(key)
     if not created:
         raise HTTPException(status_code=500, detail="Failed to create council profile.")
     return created
@@ -411,7 +411,7 @@ async def create_council_profile(request: CreateCouncilRequest):
 @app.put("/api/councils/{council_key}", response_model=CouncilProfile)
 async def update_council_profile(council_key: str, request: UpdateCouncilRequest):
     """Update an existing council profile."""
-    existing = storage.get_council(council_key)
+    existing = await storage.get_council(council_key)
     if not existing:
         raise HTTPException(status_code=404, detail="Council not found.")
 
@@ -430,15 +430,15 @@ async def update_council_profile(council_key: str, request: UpdateCouncilRequest
     if chairman_model not in normalized_council:
         raise HTTPException(status_code=400, detail="Chairman must be one of the council models")
 
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
 
-    storage.upsert_council(council_key, name, normalized_council, chairman_model)
+    await storage.upsert_council(council_key, name, normalized_council, chairman_model)
 
     updated_available = _build_available_models(settings, [*normalized_council, chairman_model])
-    storage.update_settings({**settings, "available_models": updated_available})
+    await storage.update_settings({**settings, "available_models": updated_available})
 
-    updated = storage.get_council(council_key)
+    updated = await storage.get_council(council_key)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update council profile.")
     return updated
@@ -449,9 +449,9 @@ async def delete_council_profile(council_key: str):
     """Delete a council profile when it is not in use."""
     if council_key == "default":
         raise HTTPException(status_code=400, detail="Default council cannot be deleted.")
-    if storage.conversation_uses_council(council_key):
+    if await storage.conversation_uses_council(council_key):
         raise HTTPException(status_code=400, detail="Cannot delete a council that is assigned to conversations.")
-    deleted = storage.delete_council(council_key)
+    deleted = await storage.delete_council(council_key)
     if not deleted:
         raise HTTPException(status_code=404, detail="Council not found.")
     return {"status": "deleted", "key": council_key}
@@ -460,22 +460,22 @@ async def delete_council_profile(council_key: str):
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
 async def list_conversations():
     """List all conversations (metadata only)."""
-    return storage.list_conversations()
+    return await storage.list_conversations()
 
 
 @app.post("/api/conversations", response_model=Conversation)
 async def create_conversation(request: CreateConversationRequest):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
     desired_council = request.council_key or "default"
-    council = storage.get_council(desired_council)
+    council = await storage.get_council(desired_council)
     if not council:
         if request.council_key:
             raise HTTPException(status_code=400, detail="Unknown council selection.")
         desired_council = "default"
-    conversation = storage.create_conversation(conversation_id, desired_council)
+    conversation = await storage.create_conversation(conversation_id, desired_council)
     conversation["council_key"] = desired_council
     return conversation
 
@@ -483,19 +483,19 @@ async def create_conversation(request: CreateConversationRequest):
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
 async def get_conversation(conversation_id: str):
     """Get a specific conversation with all its messages."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = await storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
     council_key = conversation.get("council_key") or "default"
-    if not storage.get_council(council_key):
+    if not await storage.get_council(council_key):
         council_key = "default"
-        storage.set_conversation_council(conversation_id, council_key)
+        await storage.set_conversation_council(conversation_id, council_key)
         conversation["council_key"] = council_key
     else:
         if not conversation.get("council_key"):
-            storage.set_conversation_council(conversation_id, council_key)
+            await storage.set_conversation_council(conversation_id, council_key)
         conversation["council_key"] = council_key
     return conversation
 
@@ -503,7 +503,7 @@ async def get_conversation(conversation_id: str):
 @app.patch("/api/conversations/{conversation_id}", response_model=ConversationMetadata)
 async def rename_conversation(conversation_id: str, request: UpdateConversationTitleRequest):
     """Rename a conversation."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = await storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -511,7 +511,7 @@ async def rename_conversation(conversation_id: str, request: UpdateConversationT
     if not new_title:
         raise HTTPException(status_code=400, detail="Title cannot be empty")
 
-    storage.update_conversation_title(conversation_id, new_title)
+    await storage.update_conversation_title(conversation_id, new_title)
 
     return {
         "id": conversation_id,
@@ -525,16 +525,16 @@ async def rename_conversation(conversation_id: str, request: UpdateConversationT
 @app.patch("/api/conversations/{conversation_id}/council", response_model=ConversationMetadata)
 async def update_conversation_council(conversation_id: str, request: UpdateConversationCouncilRequest):
     """Assign a council profile to a conversation."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = await storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
-    council = storage.get_council(request.council_key) if request.council_key else None
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
+    council = await storage.get_council(request.council_key) if request.council_key else None
     if not council:
         raise HTTPException(status_code=400, detail="Unknown council selection.")
 
-    storage.set_conversation_council(conversation_id, council["key"])
+    await storage.set_conversation_council(conversation_id, council["key"])
 
     return {
         "id": conversation_id,
@@ -548,11 +548,11 @@ async def update_conversation_council(conversation_id: str, request: UpdateConve
 @app.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
     """Delete a conversation and its messages."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = await storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    deleted = storage.delete_conversation(conversation_id)
+    deleted = await storage.delete_conversation(conversation_id)
     if not deleted:
         raise HTTPException(status_code=500, detail="Failed to delete conversation")
 
@@ -588,12 +588,12 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     history = deque(conversation["messages"], maxlen=MAX_HISTORY_BUFFER)
 
     # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    await storage.add_user_message(conversation_id, request.content)
 
     # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
-        storage.update_conversation_title(conversation_id, title)
+        await storage.update_conversation_title(conversation_id, title)
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
@@ -604,7 +604,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     )
 
     # Add assistant message with all stages
-    storage.add_assistant_message(
+    await storage.add_assistant_message(
         conversation_id,
         stage1_results,
         stage2_results,
@@ -628,19 +628,19 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     Returns Server-Sent Events as each stage completes.
     """
     # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    conversation = await storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
     council_key = conversation.get("council_key") or "default"
-    council = storage.get_council(council_key) or storage.get_council("default")
+    council = await storage.get_council(council_key) or await storage.get_council("default")
     if not council:
         raise HTTPException(status_code=400, detail="No council profiles are configured.")
-    _ensure_settings_ready(council)
+    await _ensure_settings_ready(council)
     if not conversation.get("council_key"):
-        storage.set_conversation_council(conversation_id, council["key"])
+        await storage.set_conversation_council(conversation_id, council["key"])
         conversation["council_key"] = council["key"]
 
     # Check if this is the first message
@@ -651,7 +651,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     async def event_generator():
         try:
             # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            await storage.add_user_message(conversation_id, request.content)
 
             # Start title generation in parallel (don't await yet)
             title_task = None
@@ -692,11 +692,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task
-                storage.update_conversation_title(conversation_id, title)
+                await storage.update_conversation_title(conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
             # Save complete assistant message
-            storage.add_assistant_message(
+            await storage.add_assistant_message(
                 conversation_id,
                 stage1_results,
                 stage2_results,
