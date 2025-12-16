@@ -248,11 +248,15 @@ def _build_available_models(
     extras: Optional[List[str]] = None,
 ) -> List[str]:
     """
-    Merge default/recommended models with anything persisted plus any ad-hoc
-    additions (e.g., newly selected models) while keeping ordering stable.
+    Merge persisted available models with any ad-hoc additions while keeping
+    ordering stable. If nothing has been saved yet, fall back to defaults.
     """
-    existing = settings.get("available_models", [])
-    merged: List[str] = [*AVAILABLE_MODELS, *existing]
+    existing = settings.get("available_models")
+    merged: List[str] = []
+    if existing is not None:
+        merged.extend(existing)
+    else:
+        merged.extend(AVAILABLE_MODELS)
     if extras:
         merged.extend(extras)
     return _normalize_models(merged)

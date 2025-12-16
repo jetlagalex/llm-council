@@ -35,6 +35,7 @@ function App() {
   const [editingCouncilName, setEditingCouncilName] = useState('General');
   const [isNewCouncil, setIsNewCouncil] = useState(false);
   const [councilError, setCouncilError] = useState('');
+  const [dirtyCouncils, setDirtyCouncils] = useState(() => new Set());
   // Track ad-hoc models users add so they can expand the council roster.
   const [newModelInput, setNewModelInput] = useState('');
   const [addModelError, setAddModelError] = useState('');
@@ -302,6 +303,7 @@ function App() {
       setNewModelInput('');
       setAddModelError('');
       setCouncilError('');
+      setDirtyCouncils(new Set());
     } catch (error) {
       console.error('Failed to load settings:', error);
       setSettingsError('Failed to load settings. Try again.');
@@ -324,6 +326,67 @@ function App() {
     setAvailableModels((prev) => [...prev, trimmed]);
     setAddModelError('');
     setNewModelInput('');
+  };
+
+  // Remove a model from the available roster and clean up any councils using it.
+  const handleRemoveModel = (model) => {
+    setSettingsError('');
+    setCouncilError('');
+
+    const blockingCouncil = councils.find(
+      (council) =>
+        council.key !== editingCouncilKey &&
+        council.council_models.includes(model) &&
+        council.council_models.length <= 1
+    );
+    if (blockingCouncil) {
+      setCouncilError(
+        `${blockingCouncil.name} would have no members if you remove ${model}. Add another model first.`
+      );
+      return;
+    }
+
+    const editingUsesModel = settingsForm.council_models.includes(model);
+    const nextCouncilModels = editingUsesModel
+      ? settingsForm.council_models.filter((m) => m !== model)
+      : settingsForm.council_models;
+    const nextChair = nextCouncilModels.includes(settingsForm.chairman_model)
+      ? settingsForm.chairman_model
+      : nextCouncilModels[0] || '';
+
+    const changedKeys = [];
+    setCouncils((prev) =>
+      prev.map((council) => {
+        if (!council.council_models.includes(model)) return council;
+        const trimmedModels = council.council_models.filter((m) => m !== model);
+        const trimmedChair = trimmedModels.includes(council.chairman_model)
+          ? council.chairman_model
+          : trimmedModels[0] || '';
+        changedKeys.push(council.key);
+        return {
+          ...council,
+          council_models: trimmedModels,
+          chairman_model: trimmedChair,
+        };
+      })
+    );
+
+    setDirtyCouncils((prev) => {
+      const merged = new Set(prev);
+      changedKeys.forEach((key) => merged.add(key));
+      if (editingUsesModel && !isNewCouncil) {
+        merged.add(editingCouncilKey);
+      }
+      return merged;
+    });
+
+    setSettingsForm((prev) => ({
+      ...prev,
+      council_models: nextCouncilModels,
+      chairman_model: nextChair,
+    }));
+
+    setAvailableModels((prev) => prev.filter((m) => m !== model));
   };
 
   const handleSelectEditingCouncil = (key) => {
@@ -442,8 +505,22 @@ function App() {
         });
       }
 
+      const dirtyKeys = Array.from(dirtyCouncils).filter(
+        (key) => key !== (savedCouncil?.key || editingCouncilKey)
+      );
+      for (const key of dirtyKeys) {
+        const council = councils.find((c) => c.key === key);
+        if (!council) continue;
+        await api.updateCouncil(key, {
+          name: council.name,
+          council_models: council.council_models,
+          chairman_model: council.chairman_model,
+        });
+      }
+
       const latestCouncils = await api.listCouncils();
       setCouncils(latestCouncils);
+      setDirtyCouncils(new Set());
 
       const defaultCouncil =
         latestCouncils.find((council) => council.key === 'default') || savedCouncil;
@@ -775,15 +852,32 @@ function App() {
                       const limitReached =
                         !checked && settingsForm.council_models.length >= 4;
                       return (
-                        <label key={model} className={`model-chip ${checked ? 'checked' : ''} ${limitReached ? 'disabled' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={limitReached}
-                            onChange={() => handleToggleModel(model)}
-                          />
-                          {model}
-                        </label>
+                        <div
+                          key={model}
+                          className={`model-chip ${checked ? 'checked' : ''} ${limitReached ? 'disabled' : ''}`}
+                        >
+                          <label className="model-chip-main">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={limitReached}
+                              onChange={() => handleToggleModel(model)}
+                            />
+                            <span className="model-chip-name">{model}</span>
+                          </label>
+                          <button
+                            type="button"
+                            className="model-delete-btn"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleRemoveModel(model);
+                            }}
+                            aria-label={`Remove ${model}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
