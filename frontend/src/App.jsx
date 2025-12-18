@@ -72,6 +72,20 @@ function App() {
   // Surface send errors near the compose box.
   const [sendError, setSendError] = useState('');
 
+  // Mark a conversation as recently interacted and re-sort the list.
+  const markConversationInteracted = useCallback((id) => {
+    if (!id) return;
+    const timestamp = new Date().toISOString();
+    setConversations((prev) => {
+      const exists = prev.some((conv) => conv.id === id);
+      if (!exists) return prev;
+      const updated = prev.map((conv) =>
+        conv.id === id ? { ...conv, lastInteracted: timestamp } : conv
+      );
+      return sortConversationsByActivity(updated);
+    });
+  }, []);
+
   // Load conversations on mount
   useEffect(() => {
     loadConversations();
@@ -97,18 +111,6 @@ function App() {
     if (currentConversationId) {
       loadConversation(currentConversationId);
     }
-  }, [currentConversationId]);
-
-  // Whenever the active conversation changes, bump it to the top of the list.
-  useEffect(() => {
-    if (!currentConversationId) return;
-    setConversations((prev) => {
-      const now = new Date().toISOString();
-      const updated = prev.map((conv) =>
-        conv.id === currentConversationId ? { ...conv, lastInteracted: now } : conv
-      );
-      return sortConversationsByActivity(updated);
-    });
   }, [currentConversationId]);
 
   const loadCouncils = async () => {
@@ -613,6 +615,7 @@ function App() {
         messages: [],
       };
     });
+    markConversationInteracted(currentConversationId);
 
     try {
       // Optimistically add user message to UI
@@ -742,7 +745,7 @@ function App() {
       }
       setIsLoading(false);
     }
-  }, [currentConversationId, conversations]);
+  }, [currentConversationId, conversations, markConversationInteracted]);
 
   return (
     <div className={`app ${isMobile ? 'is-mobile' : ''}`}>
