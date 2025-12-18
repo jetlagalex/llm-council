@@ -4,6 +4,28 @@ import ChatInterface from './components/ChatInterface';
 import { api } from './api';
 import './App.css';
 
+// Keep newest interactions first without mutating the original list.
+const sortConversationsByActivity = (list) => {
+  const toTime = (value) => (value ? new Date(value).getTime() : 0);
+  return [...list].sort(
+    (a, b) =>
+      toTime(b.lastInteracted || b.created_at) -
+      toTime(a.lastInteracted || a.created_at)
+  );
+};
+
+// Preserve last-interacted timestamps when refreshing data from the API.
+const mergeConversationsWithRecency = (incoming, previous) => {
+  const prevMap = new Map(previous.map((conv) => [conv.id, conv]));
+  const normalized = incoming.map((conv) => ({
+    ...conv,
+    council_key: conv.council_key || 'default',
+    lastInteracted:
+      prevMap.get(conv.id)?.lastInteracted || conv.lastInteracted || conv.created_at,
+  }));
+  return sortConversationsByActivity(normalized);
+};
+
 // Root layout: manages conversation list, selection, and streamed message flow.
 function App() {
   const [conversations, setConversations] = useState([]);
@@ -77,6 +99,18 @@ function App() {
     }
   }, [currentConversationId]);
 
+  // Whenever the active conversation changes, bump it to the top of the list.
+  useEffect(() => {
+    if (!currentConversationId) return;
+    setConversations((prev) => {
+      const now = new Date().toISOString();
+      const updated = prev.map((conv) =>
+        conv.id === currentConversationId ? { ...conv, lastInteracted: now } : conv
+      );
+      return sortConversationsByActivity(updated);
+    });
+  }, [currentConversationId]);
+
   const loadCouncils = async () => {
     try {
       const councilList = await api.listCouncils();
@@ -95,15 +129,14 @@ function App() {
   const loadConversations = async () => {
     try {
       const convs = await api.listConversations();
-      const normalized = convs.map((conv) => ({
-        ...conv,
-        council_key: conv.council_key || 'default',
-      }));
-      setConversations(normalized);
-      if (!currentConversationId && convs.length > 0) {
-        setCurrentConversationId(normalized[0].id);
-        setSelectedCouncilKey(normalized[0].council_key || 'default');
-      }
+      setConversations((prev) => {
+        const merged = mergeConversationsWithRecency(convs, prev);
+        if (!currentConversationId && merged.length > 0) {
+          setCurrentConversationId(merged[0].id);
+          setSelectedCouncilKey(merged[0].council_key || 'default');
+        }
+        return merged;
+      });
     } catch (error) {
       console.error('Failed to load conversations:', error);
     }
@@ -132,16 +165,20 @@ function App() {
         'default';
       const newConv = await api.createConversation(preferredCouncil);
       const newCouncilKey = newConv.council_key || preferredCouncil || 'default';
-      setConversations([
-        {
-          id: newConv.id,
-          created_at: newConv.created_at,
-          message_count: 0,
-          title: newConv.title,
-          council_key: newCouncilKey,
-        },
-        ...conversations,
-      ]);
+      const lastInteracted = new Date().toISOString();
+      setConversations((prev) =>
+        sortConversationsByActivity([
+          {
+            id: newConv.id,
+            created_at: newConv.created_at,
+            message_count: 0,
+            title: newConv.title,
+            council_key: newCouncilKey,
+            lastInteracted,
+          },
+          ...prev,
+        ])
+      );
 
       setCurrentConversationId(newConv.id);
       setCurrentConversation({ ...newConv, council_key: newCouncilKey || 'default', messages: [] });
@@ -152,7 +189,7 @@ function App() {
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
-  }, [councils, selectedCouncilKey, conversations, isMobile]);
+  }, [councils, selectedCouncilKey, isMobile]);
 
   const handleSelectConversation = useCallback((id) => {
     setCurrentConversationId(id);
