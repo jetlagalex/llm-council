@@ -165,7 +165,6 @@ function App() {
   const loadConversation = async (id) => {
     try {
       const conv = await api.getConversation(id);
-      const recency = getLastInteracted(conv) || new Date().toISOString();
       setCurrentConversation(conv);
       if (conv?.council_key) {
         setSelectedCouncilKey(conv.council_key);
@@ -177,8 +176,8 @@ function App() {
               ? {
                   ...c,
                   council_key: conv.council_key || c.council_key,
-                  lastInteracted: recency,
-                  last_interacted_at: recency,
+                  lastInteracted: getLastInteracted(conv) || c.lastInteracted || c.created_at,
+                  last_interacted_at: conv.last_interacted_at || c.last_interacted_at || c.created_at,
                 }
               : c
           )
@@ -226,7 +225,6 @@ function App() {
 
   const handleSelectConversation = useCallback((id) => {
     setCurrentConversationId(id);
-    markConversationInteracted(id);
     const match = conversations.find((conv) => conv.id === id);
     if (match?.council_key) {
       setSelectedCouncilKey(match.council_key);

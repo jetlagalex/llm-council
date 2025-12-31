@@ -273,15 +273,6 @@ def _sync_get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         conv = cur.fetchone()
         if not conv:
             return None
-        last_interacted_at = datetime.utcnow().isoformat()
-        conn.execute(
-            """
-            UPDATE conversations
-            SET last_interacted_at = ?
-            WHERE id = ?
-            """,
-            (last_interacted_at, conversation_id),
-        )
         council_cur = conn.execute(
             "SELECT council_key FROM conversation_council WHERE conversation_id = ?",
             (conversation_id,),
@@ -306,7 +297,7 @@ def _sync_get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         "id": conv[0],
         "created_at": conv[1],
         "title": conv[2],
-        "last_interacted_at": last_interacted_at,
+        "last_interacted_at": conv[3] or conv[1],
         "council_key": council_row[0] if council_row else None,
         "messages": list(messages),
     }
