@@ -22,7 +22,8 @@ def _sync_ensure_db():
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
-                title TEXT NOT NULL
+                title TEXT NOT NULL,
+                last_interacted_at TEXT
             )
             """
         )
@@ -42,6 +43,18 @@ def _sync_ensure_db():
             )
             """
         )
+        # Backfill the last_interacted_at column for pre-existing databases.
+        cur = conn.execute("PRAGMA table_info(conversations)")
+        columns = {row[1] for row in cur.fetchall()}
+        if "last_interacted_at" not in columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN last_interacted_at TEXT")
+            conn.execute(
+                """
+                UPDATE conversations
+                SET last_interacted_at = created_at
+                WHERE last_interacted_at IS NULL
+                """
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS settings (
@@ -79,8 +92,11 @@ def _sync_create_conversation(conversation_id: str, council_key: Optional[str] =
     created_at = datetime.utcnow().isoformat()
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, created_at, title) VALUES (?, ?, ?)",
-            (conversation_id, created_at, "New Conversation"),
+            """
+            INSERT INTO conversations (id, created_at, title, last_interacted_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, created_at, "New Conversation", created_at),
         )
         if council_key:
             conn.execute(
@@ -95,6 +111,7 @@ def _sync_create_conversation(conversation_id: str, council_key: Optional[str] =
         "id": conversation_id,
         "created_at": created_at,
         "title": "New Conversation",
+        "last_interacted_at": created_at,
         "messages": [],
     }
 
@@ -250,12 +267,21 @@ async def conversation_uses_council(key: str) -> bool:
 def _sync_get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     with _connect() as conn:
         cur = conn.execute(
-            "SELECT id, created_at, title FROM conversations WHERE id = ?",
+            "SELECT id, created_at, title, last_interacted_at FROM conversations WHERE id = ?",
             (conversation_id,),
         )
         conv = cur.fetchone()
         if not conv:
             return None
+        last_interacted_at = datetime.utcnow().isoformat()
+        conn.execute(
+            """
+            UPDATE conversations
+            SET last_interacted_at = ?
+            WHERE id = ?
+            """,
+            (last_interacted_at, conversation_id),
+        )
         council_cur = conn.execute(
             "SELECT council_key FROM conversation_council WHERE conversation_id = ?",
             (conversation_id,),
@@ -280,6 +306,7 @@ def _sync_get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         "id": conv[0],
         "created_at": conv[1],
         "title": conv[2],
+        "last_interacted_at": last_interacted_at,
         "council_key": council_row[0] if council_row else None,
         "messages": list(messages),
     }
@@ -288,6 +315,26 @@ def _sync_get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 async def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """Load a conversation with all messages."""
     return await asyncio.to_thread(_sync_get_conversation, conversation_id)
+
+
+def _sync_touch_conversation(conversation_id: str, when: Optional[str] = None) -> Optional[str]:
+    """Update the last_interacted_at timestamp for a conversation."""
+    timestamp = when or datetime.utcnow().isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE conversations
+            SET last_interacted_at = ?
+            WHERE id = ?
+            """,
+            (timestamp, conversation_id),
+        )
+    return timestamp if cur.rowcount else None
+
+
+async def touch_conversation(conversation_id: str, when: Optional[str] = None) -> Optional[str]:
+    """Async wrapper to mark a conversation as recently interacted with."""
+    return await asyncio.to_thread(_sync_touch_conversation, conversation_id, when)
 
 
 def save_conversation(_: Dict[str, Any]):
@@ -393,12 +440,12 @@ def _sync_list_conversations() -> List[Dict[str, Any]]:
     with _connect() as conn:
         cur = conn.execute(
             """
-            SELECT c.id, c.created_at, c.title, COUNT(m.id) as message_count, cc.council_key
+            SELECT c.id, c.created_at, c.title, c.last_interacted_at, COUNT(m.id) as message_count, cc.council_key
             FROM conversations c
             LEFT JOIN messages m ON c.id = m.conversation_id
             LEFT JOIN conversation_council cc ON cc.conversation_id = c.id
             GROUP BY c.id
-            ORDER BY c.created_at DESC
+            ORDER BY COALESCE(c.last_interacted_at, c.created_at) DESC
             """
         )
         rows = cur.fetchall()
@@ -408,8 +455,9 @@ def _sync_list_conversations() -> List[Dict[str, Any]]:
             "id": row[0],
             "created_at": row[1],
             "title": row[2],
-            "message_count": row[3],
-            "council_key": row[4] or "default",
+            "last_interacted_at": row[3] or row[1],
+            "message_count": row[4],
+            "council_key": row[5] or "default",
         }
         for row in rows
     ]
@@ -429,6 +477,14 @@ def _sync_add_user_message(conversation_id: str, content: str):
             VALUES (?, ?, ?, ?)
             """,
             (conversation_id, created_at, "user", content),
+        )
+        conn.execute(
+            """
+            UPDATE conversations
+            SET last_interacted_at = ?
+            WHERE id = ?
+            """,
+            (created_at, conversation_id),
         )
 
 
@@ -459,6 +515,14 @@ def _sync_add_assistant_message(
                 json.dumps(stage3),
                 json.dumps(metadata) if metadata else None,
             ),
+        )
+        conn.execute(
+            """
+            UPDATE conversations
+            SET last_interacted_at = ?
+            WHERE id = ?
+            """,
+            (created_at, conversation_id),
         )
 
 

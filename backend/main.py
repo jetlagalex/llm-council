@@ -74,6 +74,7 @@ class ConversationMetadata(BaseModel):
     id: str
     created_at: str
     title: str
+    last_interacted_at: Optional[str] = None
     message_count: int
     council_key: Optional[str] = None
 
@@ -83,6 +84,7 @@ class Conversation(BaseModel):
     id: str
     created_at: str
     title: str
+    last_interacted_at: Optional[str] = None
     council_key: Optional[str] = None
     messages: List[Dict[str, Any]]
 
@@ -518,6 +520,7 @@ async def rename_conversation(conversation_id: str, request: UpdateConversationT
         "created_at": conversation["created_at"],
         "title": new_title,
         "message_count": len(conversation["messages"]),
+        "last_interacted_at": conversation.get("last_interacted_at"),
         "council_key": conversation.get("council_key"),
     }
 
@@ -541,6 +544,7 @@ async def update_conversation_council(conversation_id: str, request: UpdateConve
         "created_at": conversation["created_at"],
         "title": conversation["title"],
         "message_count": len(conversation["messages"]),
+        "last_interacted_at": conversation.get("last_interacted_at"),
         "council_key": council["key"],
     }
 

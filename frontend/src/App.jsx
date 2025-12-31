@@ -4,13 +4,21 @@ import ChatInterface from './components/ChatInterface';
 import { api } from './api';
 import './App.css';
 
+const getLastInteracted = (conv) =>
+  (conv &&
+    (conv.lastInteracted ||
+      conv.last_interacted_at ||
+      conv.updated_at ||
+      conv.created_at)) ||
+  null;
+
 // Keep newest interactions first without mutating the original list.
 const sortConversationsByActivity = (list) => {
   const toTime = (value) => (value ? new Date(value).getTime() : 0);
   return [...list].sort(
     (a, b) =>
-      toTime(b.lastInteracted || b.created_at) -
-      toTime(a.lastInteracted || a.created_at)
+      toTime(getLastInteracted(b)) -
+      toTime(getLastInteracted(a))
   );
 };
 
@@ -21,7 +29,15 @@ const mergeConversationsWithRecency = (incoming, previous) => {
     ...conv,
     council_key: conv.council_key || 'default',
     lastInteracted:
-      prevMap.get(conv.id)?.lastInteracted || conv.lastInteracted || conv.created_at,
+      getLastInteracted(conv) ||
+      getLastInteracted(prevMap.get(conv.id)) ||
+      conv.created_at,
+    last_interacted_at:
+      conv.last_interacted_at ||
+      prevMap.get(conv.id)?.last_interacted_at ||
+      getLastInteracted(conv) ||
+      getLastInteracted(prevMap.get(conv.id)) ||
+      conv.created_at,
   }));
   return sortConversationsByActivity(normalized);
 };
@@ -73,14 +89,16 @@ function App() {
   const [sendError, setSendError] = useState('');
 
   // Mark a conversation as recently interacted and re-sort the list.
-  const markConversationInteracted = useCallback((id) => {
+  const markConversationInteracted = useCallback((id, timestamp) => {
     if (!id) return;
-    const timestamp = new Date().toISOString();
+    const ts = timestamp || new Date().toISOString();
     setConversations((prev) => {
       const exists = prev.some((conv) => conv.id === id);
       if (!exists) return prev;
       const updated = prev.map((conv) =>
-        conv.id === id ? { ...conv, lastInteracted: timestamp } : conv
+        conv.id === id
+          ? { ...conv, lastInteracted: ts, last_interacted_at: ts }
+          : conv
       );
       return sortConversationsByActivity(updated);
     });
@@ -147,12 +165,24 @@ function App() {
   const loadConversation = async (id) => {
     try {
       const conv = await api.getConversation(id);
+      const recency = getLastInteracted(conv) || new Date().toISOString();
       setCurrentConversation(conv);
       if (conv?.council_key) {
         setSelectedCouncilKey(conv.council_key);
       }
       setConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, council_key: conv.council_key || c.council_key } : c))
+        sortConversationsByActivity(
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  council_key: conv.council_key || c.council_key,
+                  lastInteracted: recency,
+                  last_interacted_at: recency,
+                }
+              : c
+          )
+        )
       );
     } catch (error) {
       console.error('Failed to load conversation:', error);
@@ -177,6 +207,7 @@ function App() {
             title: newConv.title,
             council_key: newCouncilKey,
             lastInteracted,
+            last_interacted_at: lastInteracted,
           },
           ...prev,
         ])
@@ -195,6 +226,7 @@ function App() {
 
   const handleSelectConversation = useCallback((id) => {
     setCurrentConversationId(id);
+    markConversationInteracted(id);
     const match = conversations.find((conv) => conv.id === id);
     if (match?.council_key) {
       setSelectedCouncilKey(match.council_key);
@@ -202,7 +234,7 @@ function App() {
     if (isMobile) {
       setIsSidebarOpen(false);
     }
-  }, [conversations, isMobile]);
+  }, [conversations, isMobile, markConversationInteracted]);
 
   // Open a custom rename modal instead of the browser prompt.
   const handleRenameConversation = useCallback((conversation) => {
