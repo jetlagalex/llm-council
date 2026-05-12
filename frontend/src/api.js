@@ -232,7 +232,7 @@ export const api = {
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent) {
+  async sendMessageStream(conversationId, content, onEvent, signal = null) {
     let response;
     try {
       response = await fetch(
@@ -243,9 +243,11 @@ export const api = {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ content }),
+          signal,
         }
       );
     } catch (networkErr) {
+      if (networkErr?.name === 'AbortError') throw networkErr;
       // Bubble up a clearer network error so the UI can show actionable help.
       throw new Error(
         `Network error talking to backend: ${networkErr?.message || 'Failed to fetch'}`

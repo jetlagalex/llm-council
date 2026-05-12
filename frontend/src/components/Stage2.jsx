@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './Stage2.css';
 
@@ -17,6 +17,11 @@ function deAnonymizeText(text, labelToModel) {
 
 export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
   const [activeTab, setActiveTab] = useState(0);
+
+  const deAnonymizedText = useMemo(
+    () => deAnonymizeText(rankings?.[activeTab]?.ranking ?? '', labelToModel),
+    [rankings, activeTab, labelToModel]
+  );
 
   if (!rankings || rankings.length === 0) {
     return null;
@@ -50,7 +55,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
         </div>
         <div className="ranking-content markdown-content">
           <ReactMarkdown>
-            {deAnonymizeText(rankings[activeTab].ranking, labelToModel)}
+            {deAnonymizedText}
           </ReactMarkdown>
         </div>
 

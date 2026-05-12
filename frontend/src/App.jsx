@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -87,6 +87,15 @@ function App() {
   const [apiKeyLast4, setApiKeyLast4] = useState(null);
   // Surface send errors near the compose box.
   const [sendError, setSendError] = useState('');
+
+  // Ref to the active stream's AbortController so we can cancel on unmount or new send.
+  const streamAbortRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.abort();
+    };
+  }, []);
 
   // Mark a conversation as recently interacted and re-sort the list.
   const markConversationInteracted = useCallback((id, timestamp) => {
@@ -631,6 +640,11 @@ function App() {
   const handleSendMessage = useCallback(async (content) => {
     if (!currentConversationId) return;
 
+    // Cancel any in-flight stream before starting a new one.
+    streamAbortRef.current?.abort();
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+
     setIsLoading(true);
     setSendError('');
     // Ensure we have a conversation object to append to (for brand new threads).
@@ -681,8 +695,8 @@ function App() {
           case 'stage1_start':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
+              const last = messages[messages.length - 1];
+              messages[messages.length - 1] = { ...last, loading: { ...last.loading, stage1: true } };
               return { ...prev, messages };
             });
             break;
@@ -690,9 +704,8 @@ function App() {
           case 'stage1_complete':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
+              const last = messages[messages.length - 1];
+              messages[messages.length - 1] = { ...last, stage1: event.data, loading: { ...last.loading, stage1: false } };
               return { ...prev, messages };
             });
             break;
@@ -700,8 +713,8 @@ function App() {
           case 'stage2_start':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
+              const last = messages[messages.length - 1];
+              messages[messages.length - 1] = { ...last, loading: { ...last.loading, stage2: true } };
               return { ...prev, messages };
             });
             break;
@@ -709,10 +722,8 @@ function App() {
           case 'stage2_complete':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
+              const last = messages[messages.length - 1];
+              messages[messages.length - 1] = { ...last, stage2: event.data, metadata: event.metadata, loading: { ...last.loading, stage2: false } };
               return { ...prev, messages };
             });
             break;
@@ -720,8 +731,8 @@ function App() {
           case 'stage3_start':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
+              const last = messages[messages.length - 1];
+              messages[messages.length - 1] = { ...last, loading: { ...last.loading, stage3: true } };
               return { ...prev, messages };
             });
             break;
@@ -729,16 +740,23 @@ function App() {
           case 'stage3_complete':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
+              const last = messages[messages.length - 1];
+              messages[messages.length - 1] = { ...last, stage3: event.data, loading: { ...last.loading, stage3: false } };
               return { ...prev, messages };
             });
             break;
 
           case 'title_complete':
-            // Reload conversations to get updated title
-            loadConversations();
+            setConversations((prev) =>
+              prev.map((conv) =>
+                conv.id === currentConversationId
+                  ? { ...conv, title: event.data.title }
+                  : conv
+              )
+            );
+            setCurrentConversation((prev) =>
+              prev ? { ...prev, title: event.data.title } : prev
+            );
             break;
 
           case 'complete':
@@ -756,8 +774,12 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      }, abortController.signal);
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        setIsLoading(false);
+        return;
+      }
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
       setCurrentConversation((prev) => ({
@@ -842,7 +864,8 @@ function App() {
                     </label>
                   </div>
                   <input
-                    type="text"
+                    type="password"
+                    autoComplete="new-password"
                     placeholder="Enter new key (leave blank to keep current)"
                     value={apiKeyInput}
                     onChange={(e) => {

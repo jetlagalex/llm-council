@@ -66,7 +66,7 @@ class UpdateConversationTitleRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
-    content: str
+    content: str = Field(..., min_length=1, max_length=32768)
 
 
 class ConversationMetadata(BaseModel):
@@ -348,7 +348,7 @@ async def update_settings(request: UpdateSettingsRequest):
         "chairman_model": chairman_model,
         "available_models": available_models,
     }
-    storage.update_settings(new_settings)
+    await storage.update_settings(new_settings)
     # Keep default council profile in sync with the saved defaults.
     default_profile = await storage.get_council("default")
     default_name = default_profile["name"] if default_profile else "General"
@@ -570,19 +570,19 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Returns the complete response with all stages.
     """
     # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
+    conversation = await storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    settings = storage.get_settings()
-    storage.ensure_default_council(settings)
+    settings = await storage.get_settings_async()
+    await storage.ensure_default_council(settings)
     council_key = conversation.get("council_key") or "default"
-    council = storage.get_council(council_key) or storage.get_council("default")
+    council = await storage.get_council(council_key) or await storage.get_council("default")
     if not council:
         raise HTTPException(status_code=400, detail="No council profiles are configured.")
-    _ensure_settings_ready(council)
+    await _ensure_settings_ready(council)
     if not conversation.get("council_key"):
-        storage.set_conversation_council(conversation_id, council["key"])
+        await storage.set_conversation_council(conversation_id, council["key"])
         conversation["council_key"] = council["key"]
 
     # Check if this is the first message
@@ -712,7 +712,8 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
         except Exception as e:
-            # Send error event
+            if title_task is not None and not title_task.done():
+                title_task.cancel()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(

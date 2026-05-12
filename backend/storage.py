@@ -82,6 +82,9 @@ def _sync_ensure_db():
             )
             """
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)"
+        )
 
 
 # Initialize database on module import (blocking is okay here)
