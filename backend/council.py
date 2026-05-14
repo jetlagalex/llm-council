@@ -16,12 +16,17 @@ from .openrouter import query_model, query_models_parallel
 logger = logging.getLogger(__name__)
 
 
-def _build_context_messages(history: Sequence[Dict[str, Any]], user_query: str) -> List[Dict[str, str]]:
+def _build_context_messages(
+    history: Sequence[Dict[str, Any]],
+    user_query: str,
+    memory_context: str = "",
+) -> List[Dict[str, str]]:
     """
     Build chat messages including prior turns so models have conversation memory.
 
     Only the final Stage 3 answer from prior assistant turns is used to keep the
     context compact and avoid leaking intermediate deliberation.
+    If memory_context is provided it is prepended to the current user message.
     """
     condensed: List[Dict[str, str]] = []
     recent_history = list(history)[-MAX_CONTEXT_MESSAGES:]
@@ -32,7 +37,8 @@ def _build_context_messages(history: Sequence[Dict[str, Any]], user_query: str) 
         elif msg["role"] == "assistant" and msg.get("stage3"):
             condensed.append({"role": "assistant", "content": msg["stage3"].get("response", "")})
 
-    condensed.append({"role": "user", "content": user_query})
+    final_content = f"{memory_context}\n\n{user_query}" if memory_context else user_query
+    condensed.append({"role": "user", "content": final_content})
     return condensed
 
 
@@ -68,12 +74,14 @@ async def stage1_collect_responses(
     user_query: str,
     history: Sequence[Dict[str, Any]],
     council_models: List[str],
+    memory_context: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        memory_context: Optional RELEVANT MEMORY block prepended to the prompt
 
     Returns:
         List of dicts with 'model' and 'response' keys
@@ -83,7 +91,7 @@ async def stage1_collect_responses(
         "stage1_collect_responses_start",
         extra={"model_count": len(council_models)},
     )
-    messages = _build_context_messages(history, user_query)
+    messages = _build_context_messages(history, user_query, memory_context)
 
     responses = await query_models_parallel(council_models, messages)
 
@@ -206,6 +214,7 @@ async def stage3_synthesize_final(
     history: Sequence[Dict[str, Any]],
     chairman_model: str,
     aggregate_rankings: Sequence[Dict[str, Any]] | None = None,
+    memory_context: str = "",
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -238,9 +247,10 @@ async def stage3_synthesize_final(
         if msg["role"] == "user" or msg.get("stage3")
     ])
 
+    memory_section = f"{memory_context}\n\n" if memory_context else ""
     chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
 
-Original Question: {user_query}
+{memory_section}Original Question: {user_query}
 
 Conversation so far (recent turns):
 {history_text}
@@ -419,6 +429,7 @@ async def run_full_council(
     history: Sequence[Dict[str, Any]],
     council_models: List[str],
     chairman_model: str,
+    memory_context: str = "",
 ) -> Tuple[
     List[Dict[str, Any]],
     List[Dict[str, Any]],
@@ -430,13 +441,14 @@ async def run_full_council(
 
     Args:
         user_query: The user's question
+        memory_context: Optional RELEVANT MEMORY block injected into Stage 1 and Stage 3 prompts
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     overall_start = perf_counter()
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query, history, council_models)
+    stage1_results = await stage1_collect_responses(user_query, history, council_models, memory_context)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -463,6 +475,7 @@ async def run_full_council(
         history,
         chairman_model,
         aggregate_rankings,
+        memory_context,
     )
 
     # Prepare metadata

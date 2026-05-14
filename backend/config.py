@@ -45,3 +45,9 @@ RETRY_JITTER: float = REQUEST_LIMITS.retry_jitter
 # SQLite database for conversation storage
 DATA_DIR = Path("data")
 DB_PATH = DATA_DIR / "council.sqlite"
+
+# Memory (MemPalace) settings
+MEMORY_ENABLED: bool = True
+MEMORY_PALACE_PATH: str = "data/palace"
+MEMORY_TOP_K: int = 5
+MEMORY_MAX_ANSWER_CHARS: int = 500

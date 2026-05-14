@@ -15,6 +15,16 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
 - Uses environment variable `OPENROUTER_API_KEY` from `.env`
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
+- Memory settings: `MEMORY_ENABLED`, `MEMORY_PALACE_PATH`, `MEMORY_TOP_K`, `MEMORY_MAX_ANSWER_CHARS`
+
+**`memory.py`** - MemPalace persistent memory layer
+- `CouncilMemory` class: `ensure_initialized()` (called on startup), `retrieve(query)` → `list[MemoryHit]`, `save_turn(...)` (called after Stage 3)
+- `format_memory_block(hits, max_chars)` → prompt string injected into Stage 1 and Stage 3
+- `MemoryHit` dataclass: `query`, `answer`, `score`, `metadata`
+- Uses MemPalace low-level API: `get_collection(palace_path, create=True)` / `collection.upsert()` / `collection.query()`
+- Wings: `user-queries` (retrieval anchor), `chairman` (linked answers), `councilor-<slug>` (per-model diary, not retrieved)
+- When `MEMORY_ENABLED=False`, `retrieve()` returns `[]` and `save_turn()` is a no-op; rest of app needs no conditionals
+- ChromaDB blocking calls run in `asyncio.to_thread()` to avoid blocking the event loop
 
 **`openrouter.py`**
 - `query_model()`: Single async model query
@@ -23,27 +33,24 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - Graceful degradation: returns None on failure, continues with successful responses
 
 **`council.py`** - The Core Logic
-- `stage1_collect_responses()`: Parallel queries to all council models
-- `stage2_collect_rankings()`:
-  - Anonymizes responses as "Response A, B, C, etc."
-  - Creates `label_to_model` mapping for de-anonymization
-  - Prompts models to evaluate and rank (with strict format requirements)
-  - Returns tuple: (rankings_list, label_to_model_dict)
-  - Each ranking includes both raw text and `parsed_ranking` list
-- `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
-- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
+- `stage1_collect_responses(user_query, history, council_models, memory_context="")`: Parallel queries to all council models; memory_context prepended to the user message
+- `stage2_collect_rankings()`: Anonymizes responses, prompts peer ranking — **not** memory-augmented by design
+- `stage3_synthesize_final(..., memory_context="")`: Chairman synthesizes; memory_context injected before "Original Question:"
+- `run_full_council(..., memory_context="")`: Orchestrates all three stages
+- `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section
 - `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
 
 **`storage.py`**
-- JSON-based conversation storage in `data/conversations/`
-- Each conversation: `{id, created_at, messages[]}`
+- SQLite-based conversation storage in `data/council.sqlite`
+- Each conversation: `{id, created_at, title, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
 - Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
 
 **`main.py`**
-- FastAPI app with CORS enabled for localhost:5173 and localhost:3000
-- POST `/api/conversations/{id}/message` returns metadata in addition to stages
-- Metadata includes: label_to_model mapping and aggregate_rankings
+- FastAPI app with CORS enabled (permissive by default, tighten via `CORS_ORIGINS` env var)
+- On startup: initialises `CouncilMemory` (runs `ensure_initialized()` in thread)
+- POST `/api/conversations/{id}/message`: retrieves memories → runs council → saves turn to palace → returns `{stage1, stage2, stage3, metadata, memory_hits}`
+- Streaming endpoint `/message/stream`: same flow, emits `memory_retrieved` SSE event before `stage1_start`
 
 ### Frontend Structure (`frontend/src/`)
 

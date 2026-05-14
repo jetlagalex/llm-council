@@ -28,9 +28,21 @@ from .config import (
     CHAIRMAN_MODEL,
     COUNCIL_MODELS,
     MAX_HISTORY_BUFFER,
+    MEMORY_ENABLED,
+    MEMORY_MAX_ANSWER_CHARS,
+    MEMORY_PALACE_PATH,
+    MEMORY_TOP_K,
     OPENROUTER_API_KEY,
 )
+from .memory import CouncilMemory, format_memory_block
 from .openrouter import close_async_client
+
+council_memory = CouncilMemory(
+    enabled=MEMORY_ENABLED,
+    palace_path=MEMORY_PALACE_PATH,
+    top_k=MEMORY_TOP_K,
+    max_answer_chars=MEMORY_MAX_ANSWER_CHARS,
+)
 
 app = FastAPI(title="LLM Council API")
 
@@ -145,6 +157,12 @@ class UpdateCouncilRequest(BaseModel):
 class UpdateConversationCouncilRequest(BaseModel):
     """Assign a council profile to a conversation."""
     council_key: str
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Initialize persistent memory palace on startup."""
+    await asyncio.to_thread(council_memory.ensure_initialized)
 
 
 @app.on_event("shutdown")
@@ -590,6 +608,11 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
     # Capture history before adding the new turn so we can include it in prompts
     history = deque(conversation["messages"], maxlen=MAX_HISTORY_BUFFER)
+    turn_index = len(conversation["messages"]) // 2
+
+    # Retrieve relevant memories before the council runs
+    memory_hits = await council_memory.retrieve(request.content)
+    memory_context = format_memory_block(memory_hits, MEMORY_MAX_ANSWER_CHARS)
 
     # Add user message
     await storage.add_user_message(conversation_id, request.content)
@@ -605,6 +628,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         history,
         council["council_models"],
         council["chairman_model"],
+        memory_context=memory_context,
     )
 
     # Add assistant message with all stages
@@ -616,12 +640,23 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         metadata
     )
 
-    # Return the complete response with metadata
+    # Persist this turn to the memory palace
+    councilor_responses = {r["model"]: r["response"] for r in stage1_results}
+    await council_memory.save_turn(
+        conversation_id=conversation_id,
+        turn_index=turn_index,
+        user_query=request.content,
+        councilor_responses=councilor_responses,
+        chairman_response=stage3_result.get("response", ""),
+    )
+
+    # Return the complete response with metadata and memory hits
     return {
         "stage1": stage1_results,
         "stage2": stage2_results,
         "stage3": stage3_result,
-        "metadata": metadata
+        "metadata": metadata,
+        "memory_hits": [h.to_dict() for h in memory_hits],
     }
 
 
@@ -650,28 +685,36 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
     history = deque(conversation["messages"], maxlen=MAX_HISTORY_BUFFER)
+    turn_index = len(conversation["messages"]) // 2
 
     # Stream stage milestones as SSE events so the UI can update incrementally.
     async def event_generator():
+        title_task = None
         try:
+            # Retrieve memories before any stage begins
+            memory_hits = await council_memory.retrieve(request.content)
+            memory_context = format_memory_block(memory_hits, MEMORY_MAX_ANSWER_CHARS)
+            serialized_hits = [h.to_dict() for h in memory_hits]
+            yield f"data: {json.dumps({'type': 'memory_retrieved', 'data': serialized_hits})}\n\n"
+
             # Add user message
             await storage.add_user_message(conversation_id, request.content)
 
             # Start title generation in parallel (don't await yet)
-            title_task = None
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
+            # Stage 1: Collect responses (with memory context)
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
             stage1_results = await stage1_collect_responses(
                 request.content,
                 history,
                 council["council_models"],
+                memory_context,
             )
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
-            # Stage 2: Collect rankings
+            # Stage 2: Collect rankings (no memory injection — peer review is current-turn only)
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(
                 request.content,
@@ -681,7 +724,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
-            # Stage 3: Synthesize final answer
+            # Stage 3: Synthesize final answer (with memory context)
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
             stage3_result = await stage3_synthesize_final(
                 request.content,
@@ -690,12 +733,14 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 history,
                 council["chairman_model"],
                 aggregate_rankings,
+                memory_context,
             )
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:
                 title = await title_task
+                title_task = None
                 await storage.update_conversation_title(conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
@@ -708,8 +753,18 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 {"label_to_model": label_to_model, "aggregate_rankings": aggregate_rankings}
             )
 
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            # Persist this turn to the memory palace
+            councilor_responses = {r["model"]: r["response"] for r in stage1_results}
+            await council_memory.save_turn(
+                conversation_id=conversation_id,
+                turn_index=turn_index,
+                user_query=request.content,
+                councilor_responses=councilor_responses,
+                chairman_response=stage3_result.get("response", ""),
+            )
+
+            # Send completion event (includes memory hits for future frontend use)
+            yield f"data: {json.dumps({'type': 'complete', 'memory_hits': serialized_hits})}\n\n"
 
         except Exception as e:
             if title_task is not None and not title_task.done():

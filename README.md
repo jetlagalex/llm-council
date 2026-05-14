@@ -79,9 +79,28 @@ npm run dev
 
 Then open http://localhost:5173 in your browser.
 
+## Memory
+
+Each completed council turn is automatically saved into a local [MemPalace](https://github.com/MemPalace/mempalace) vector store at `data/palace/`. On every new query the palace is searched for semantically similar past exchanges, and the top results are injected into the Stage 1 and Stage 3 prompts as a `RELEVANT MEMORY` block. This gives every council member long-term memory that spans across separate conversation sessions.
+
+**To disable memory** (reverts to vanilla behaviour): set `MEMORY_ENABLED = False` in `backend/config.py`.
+
+**Tunable settings** in `backend/config.py`:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `MEMORY_ENABLED` | `True` | Master on/off switch |
+| `MEMORY_PALACE_PATH` | `data/palace` | Where ChromaDB stores its files |
+| `MEMORY_TOP_K` | `5` | Number of past exchanges to retrieve |
+| `MEMORY_MAX_ANSWER_CHARS` | `500` | Truncation limit for injected answers |
+
+The palace lives entirely on disk — no third-party services, no API keys required beyond OpenRouter.
+
+> **First run note:** MemPalace uses the `all-MiniLM-L6-v2` sentence-transformer model for embeddings. On the very first startup it will download ~90 MB of model weights and cache them locally. Subsequent starts are instant.
+
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
 - **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
+- **Storage:** SQLite (`data/council.sqlite`) + MemPalace vector store (`data/palace/`)
 - **Package Management:** uv for Python, npm for JavaScript
