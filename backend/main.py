@@ -161,8 +161,13 @@ class UpdateConversationCouncilRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Initialize persistent memory palace on startup."""
-    await asyncio.to_thread(council_memory.ensure_initialized)
+    """Kick off memory palace initialization in the background.
+
+    Running as a fire-and-forget task so FastAPI starts accepting requests
+    immediately. Until initialization completes, retrieve() returns [] and
+    save_turn() is a no-op — both degrade gracefully.
+    """
+    asyncio.create_task(asyncio.to_thread(council_memory.ensure_initialized))
 
 
 @app.on_event("shutdown")
