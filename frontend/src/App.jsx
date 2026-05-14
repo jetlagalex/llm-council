@@ -392,6 +392,7 @@ function App() {
   }, [currentConversation, selectedCouncilKey]);
 
   // Allow adding custom OpenRouter model IDs to the available council roster.
+  // Auto-selects the model for the current council if there is still room (< 4 members).
   const handleAddModel = () => {
     const trimmed = newModelInput.trim();
     if (!trimmed) {
@@ -403,6 +404,12 @@ function App() {
       return;
     }
     setAvailableModels((prev) => [...prev, trimmed]);
+    setSettingsForm((prev) => {
+      if (prev.council_models.length >= 4) return prev;
+      const nextModels = [...prev.council_models, trimmed];
+      const nextChair = prev.chairman_model || nextModels[0];
+      return { ...prev, council_models: nextModels, chairman_model: nextChair };
+    });
     setAddModelError('');
     setNewModelInput('');
   };
