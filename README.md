@@ -20,9 +20,14 @@ This project was 99% vibe coded as a fun Saturday hack because I wanted to explo
 
 The project uses [uv](https://docs.astral.sh/uv/) for project management.
 
-**Backend:**
+**Backend (base, no memory):**
 ```bash
 uv sync
+```
+
+**Backend (with persistent memory):**
+```bash
+uv sync --extra memory
 ```
 
 **Frontend:**
