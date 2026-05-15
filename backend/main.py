@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 from collections import deque
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -44,7 +45,15 @@ council_memory = CouncilMemory(
     max_answer_chars=MEMORY_MAX_ANSWER_CHARS,
 )
 
-app = FastAPI(title="LLM Council API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(asyncio.to_thread(council_memory.ensure_initialized))
+    yield
+    await close_async_client()
+
+
+app = FastAPI(title="LLM Council API", lifespan=lifespan)
 
 # Enable CORS. Default to permissive so mobile devices or other hosts (e.g. in
 # a proxmox container) can reach the API, but allow tightening via CORS_ORIGINS.
@@ -157,23 +166,6 @@ class UpdateCouncilRequest(BaseModel):
 class UpdateConversationCouncilRequest(BaseModel):
     """Assign a council profile to a conversation."""
     council_key: str
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Kick off memory palace initialization in the background.
-
-    Running as a fire-and-forget task so FastAPI starts accepting requests
-    immediately. Until initialization completes, retrieve() returns [] and
-    save_turn() is a no-op — both degrade gracefully.
-    """
-    asyncio.create_task(asyncio.to_thread(council_memory.ensure_initialized))
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Ensure outbound HTTP clients are cleaned up."""
-    await close_async_client()
 
 
 @app.get("/")
